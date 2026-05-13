@@ -6,22 +6,16 @@ const { success, created, error } = require('../../utils/response.utils');
 
 // POST /auth/login
 const login = async (req, res) => {
-  const { username, password, branch_id } = req.body;
+  const { username, password } = req.body;
   if (!username || !password) {
     return error(res, 'Username va parol talab qilinadi');
   }
 
   try {
-    // branch_id berilgan bo'lsa filtr qo'shamiz (super_admin uchun kerak emas)
-    let query = `SELECT * FROM users WHERE username = $1 AND is_active = TRUE`;
-    const params = [username];
-
-    if (branch_id) {
-      query += ` AND branch_id = $2`;
-      params.push(branch_id);
-    }
-
-    const result = await pool.query(query, params);
+    const result = await pool.query(
+      `SELECT * FROM users WHERE username = $1 AND is_active = TRUE`,
+      [username]
+    );
     if (result.rows.length === 0) {
       return error(res, 'Username yoki parol noto\'g\'ri', 401);
     }
