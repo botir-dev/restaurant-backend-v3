@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: restaurant-backend
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: restaurant-db
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRES
+        value: 60m
+      - key: JWT_REFRESH_EXPIRES
+        value: 7d
+
+databases:
+  - name: restaurant-db
+    plan: free
