@@ -26,15 +26,20 @@ const initDB = async () => {
       console.log("DB sxemasi allaqachon mavjud");
     }
 
+    const username = process.env.SUPER_ADMIN_USERNAME || "superadmin";
+    const password = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345";
+
+    if (process.env.RESET_SUPER_ADMIN === "true") {
+      await pool.query(`DELETE FROM users WHERE role = 'super_admin'`);
+      console.log("Eski super admin o'chirildi");
+    }
+
     const adminCheck = await pool.query(
       `SELECT id FROM users WHERE role = 'super_admin' LIMIT 1`,
     );
 
     if (adminCheck.rows.length === 0) {
-      const username = process.env.SUPER_ADMIN_USERNAME || "superadmin";
-      const password = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345";
       const passwordHash = await bcrypt.hash(password, 12);
-
       await pool.query(
         `INSERT INTO users (id, full_name, username, password_hash, role)
          VALUES ($1, 'Super Admin', $2, $3, 'super_admin')`,
