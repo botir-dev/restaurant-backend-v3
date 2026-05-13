@@ -4,6 +4,13 @@ const pool = require('../../config/database');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../../utils/jwt.utils');
 const { success, created, error } = require('../../utils/response.utils');
 
+// PostgreSQL array ni parse qilish: '{"food","drink"}' -> ['food','drink']
+const parsePermissions = (val) => {
+  if (!val || val === '{}') return [];
+  if (Array.isArray(val)) return val;
+  return val.replace(/^{|}$/g, '').split(',').filter(Boolean);
+};
+
 // POST /auth/login
 const login = async (req, res) => {
   const { username, password } = req.body;
@@ -32,7 +39,7 @@ const login = async (req, res) => {
       role: user.role,
       restaurant_id: user.restaurant_id,
       branch_id: user.branch_id,
-      extra_permissions: user.extra_permissions || []
+      extra_permissions: parsePermissions(user.extra_permissions)
     };
 
     const accessToken = generateAccessToken(payload);
@@ -49,7 +56,7 @@ const login = async (req, res) => {
       access_token: accessToken,
       refresh_token: refreshToken,
       role: user.role,
-      extra_permissions: user.extra_permissions || [],
+      extra_permissions: parsePermissions(user.extra_permissions),
       branch_id: user.branch_id,
       restaurant_id: user.restaurant_id,
       full_name: user.full_name
@@ -96,7 +103,7 @@ const refresh = async (req, res) => {
       role: user.role,
       restaurant_id: user.restaurant_id,
       branch_id: user.branch_id,
-      extra_permissions: user.extra_permissions || []
+      extra_permissions: parsePermissions(user.extra_permissions)
     };
 
     const newAccessToken = generateAccessToken(newPayload);
