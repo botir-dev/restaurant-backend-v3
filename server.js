@@ -1,6 +1,8 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
+const bcrypt = require("bcryptjs");
+const { v4: uuidv4 } = require("uuid");
 const app = require("./src/app");
 const pool = require("./src/config/database");
 const { startCronJobs } = require("./src/utils/cron.utils");
@@ -12,16 +14,40 @@ const initDB = async () => {
     const check = await pool.query(
       `SELECT to_regclass('public.users') as exists`,
     );
-    if (check.rows[0].exists) {
-      console.log("DB sxemasi allaqachon mavjud, o'tkazib yuborildi");
-      return;
+
+    if (!check.rows[0].exists) {
+      const schema = fs.readFileSync(
+        path.join(__dirname, "src/config/schema.sql"),
+        "utf8",
+      );
+      await pool.query(schema);
+      console.log("DB sxemasi muvaffaqiyatli yaratildi");
+    } else {
+      console.log("DB sxemasi allaqachon mavjud");
     }
-    const schema = fs.readFileSync(
-      path.join(__dirname, "src/config/schema.sql"),
-      "utf8",
+
+    const adminCheck = await pool.query(
+      `SELECT id FROM users WHERE role = 'super_admin' LIMIT 1`,
     );
-    await pool.query(schema);
-    console.log("DB sxemasi muvaffaqiyatli yaratildi");
+
+    if (adminCheck.rows.length === 0) {
+      const username = process.env.SUPER_ADMIN_USERNAME || "superadmin";
+      const password = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345";
+      const passwordHash = await bcrypt.hash(password, 12);
+
+      await pool.query(
+        `INSERT INTO users (id, full_name, username, password_hash, role)
+         VALUES ($1, 'Super Admin', $2, $3, 'super_admin')`,
+        [uuidv4(), username, passwordHash],
+      );
+      console.log("=================================");
+      console.log("Super admin yaratildi!");
+      console.log(`Username: ${username}`);
+      console.log(`Password: ${password}`);
+      console.log("=================================");
+    } else {
+      console.log("Super admin allaqachon mavjud");
+    }
   } catch (err) {
     console.error("DB init xatosi:", err.message);
   }
