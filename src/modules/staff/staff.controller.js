@@ -3,6 +3,9 @@ const { v4: uuidv4 } = require('uuid');
 const pool = require('../../config/database');
 const { success, created, error } = require('../../utils/response.utils');
 
+const BASE_ROLES = ['waiter', 'cashier', 'storekeeper', 'cook', 'baker',
+  'somsa_maker', 'grill_master', 'turkish_cook', 'bartender', 'icecream_maker', 'tea_master'];
+
 // GET /staff
 const getStaff = async (req, res) => {
   try {
@@ -27,14 +30,22 @@ const createStaff = async (req, res) => {
     return error(res, 'Ism, username, parol va rol talab qilinadi');
   }
 
-  const validRoles = ['waiter', 'cashier', 'storekeeper', 'cook', 'baker',
-    'somsa_maker', 'grill_master', 'turkish_cook', 'bartender', 'icecream_maker', 'tea_master'];
-  if (!validRoles.includes(role)) {
-    return error(res, 'Noto\'g\'ri rol');
-  }
-
   try {
+    // Standart rol emas bo'lsa — custom_roles jadvalidan tekshirish
+    if (!BASE_ROLES.includes(role)) {
+      const customCheck = await pool.query(
+        `SELECT id FROM custom_roles WHERE key = $1 AND branch_id = $2`,
+        [role, req.branchId]
+      );
+      if (customCheck.rows.length === 0) {
+        return error(res, 'Noto\'g\'ri rol. Avval bu rolni custom_roles ga qo\'shing');
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
+
+    // role ni text sifatida saqlaymiz — ENUM cheklovini chetlab o'tish uchun
+    // Buning uchun users.role ni text ga migration qilish kerak (server.js da)
     const result = await pool.query(
       `INSERT INTO users (id, restaurant_id, branch_id, full_name, username, phone, password_hash, role, extra_permissions)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -45,6 +56,7 @@ const createStaff = async (req, res) => {
     return created(res, result.rows[0], 'Hodim yaratildi');
   } catch (err) {
     if (err.code === '23505') return error(res, 'Bu username allaqachon mavjud');
+    if (err.code === '22P02') return error(res, 'Bu rol ENUM da yo\'q. Migration kerak');
     console.error(err);
     return error(res, 'Server xatosi', 500);
   }
@@ -56,6 +68,17 @@ const updateStaff = async (req, res) => {
   const { full_name, phone, password, role, extra_permissions } = req.body;
 
   try {
+    // Rol o'zgartirilsa tekshirish
+    if (role && !BASE_ROLES.includes(role)) {
+      const customCheck = await pool.query(
+        `SELECT id FROM custom_roles WHERE key = $1 AND branch_id = $2`,
+        [role, req.branchId]
+      );
+      if (customCheck.rows.length === 0) {
+        return error(res, 'Noto\'g\'ri rol');
+      }
+    }
+
     let passwordHash = undefined;
     if (password) passwordHash = await bcrypt.hash(password, 12);
 
@@ -74,12 +97,13 @@ const updateStaff = async (req, res) => {
     if (result.rows.length === 0) return error(res, 'Hodim topilmadi', 404);
     return success(res, result.rows[0], 'Hodim yangilandi');
   } catch (err) {
+    if (err.code === '22P02') return error(res, 'Bu rol tizimda mavjud emas');
     console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
 
-// DELETE /staff/:id  (soft delete)
+// DELETE /staff/:id (soft delete)
 const deleteStaff = async (req, res) => {
   const { id } = req.params;
   try {
