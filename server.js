@@ -22,28 +22,51 @@ const initDB = async () => {
     }
 
     // 2. MIGRATION: users.role ENUM -> TEXT
-    // Bu custom rollarni saqlash imkonini beradi
-    const roleColType = await pool.query(`
-      SELECT data_type FROM information_schema.columns
-      WHERE table_name = 'users' AND column_name = 'role'
-    `);
-    if (roleColType.rows[0]?.data_type !== 'text') {
-      await pool.query(`ALTER TABLE users ALTER COLUMN role TYPE TEXT USING role::TEXT`);
-      console.log('Migration: users.role ENUM -> TEXT');
+    try {
+      const roleCol = await pool.query(`
+        SELECT data_type, udt_name FROM information_schema.columns
+        WHERE table_name = 'users' AND column_name = 'role'
+      `);
+      const isEnum = roleCol.rows[0]?.udt_name === 'user_role';
+      if (isEnum) {
+        // ENUM ni TEXT ga o'girish — to'g'ri usul
+        await pool.query(`ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(100) USING role::TEXT`);
+        console.log('Migration OK: users.role -> VARCHAR(100)');
+      }
+    } catch (e) {
+      console.log('users.role migration:', e.message);
     }
 
     // 3. MIGRATION: products.type ENUM -> TEXT
-    // Bu custom mahsulot turlarini saqlash imkonini beradi
-    const typeColType = await pool.query(`
-      SELECT data_type FROM information_schema.columns
-      WHERE table_name = 'products' AND column_name = 'type'
-    `);
-    if (typeColType.rows[0]?.data_type !== 'text') {
-      await pool.query(`ALTER TABLE products ALTER COLUMN type TYPE TEXT USING type::TEXT`);
-      console.log('Migration: products.type ENUM -> TEXT');
+    try {
+      const typeCol = await pool.query(`
+        SELECT data_type, udt_name FROM information_schema.columns
+        WHERE table_name = 'products' AND column_name = 'type'
+      `);
+      const isEnum = typeCol.rows[0]?.udt_name === 'product_type';
+      if (isEnum) {
+        await pool.query(`ALTER TABLE products ALTER COLUMN type TYPE VARCHAR(100) USING type::TEXT`);
+        console.log('Migration OK: products.type -> VARCHAR(100)');
+      }
+    } catch (e) {
+      console.log('products.type migration:', e.message);
     }
 
-    // 4. Yangi jadvallarni qo'shish
+    // 4. MIGRATION: extra_permissions ARRAY -> TEXT[]  (agar hali o'zgartirilmagan bo'lsa)
+    try {
+      const permCol = await pool.query(`
+        SELECT udt_name FROM information_schema.columns
+        WHERE table_name = 'users' AND column_name = 'extra_permissions'
+      `);
+      if (permCol.rows[0]?.udt_name === 'product_type') {
+        await pool.query(`ALTER TABLE users ALTER COLUMN extra_permissions TYPE TEXT[] USING extra_permissions::TEXT[]`);
+        console.log('Migration OK: users.extra_permissions -> TEXT[]');
+      }
+    } catch (e) {
+      console.log('extra_permissions migration:', e.message);
+    }
+
+    // 5. Yangi jadvallarni qo'shish
     await pool.query(`
       CREATE TABLE IF NOT EXISTS custom_roles (
         id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -69,7 +92,7 @@ const initDB = async () => {
     `);
     console.log('Jadvallar tekshirildi');
 
-    // 5. Super admin
+    // 6. Super admin
     const username = process.env.SUPER_ADMIN_USERNAME || 'superadmin';
     const password = process.env.SUPER_ADMIN_PASSWORD || 'Admin@12345';
 
@@ -86,13 +109,9 @@ const initDB = async () => {
          VALUES ($1, 'Super Admin', $2, $3, 'super_admin')`,
         [uuidv4(), username, passwordHash]
       );
-      console.log('=================================');
-      console.log('Super admin yaratildi!');
-      console.log(`Username: ${username}`);
-      console.log(`Password: ${password}`);
-      console.log('=================================');
+      console.log(`Super admin yaratildi: ${username}`);
     } else {
-      console.log('Super admin allaqachon mavjud');
+      console.log('Super admin mavjud');
     }
 
   } catch (err) {
@@ -101,7 +120,6 @@ const initDB = async () => {
   }
 };
 
-// initDB LISTEN DAN OLDIN ishlaydi
 initDB().then(() => {
   app.listen(PORT, () => {
     console.log(`Server ${PORT}-portda ishlamoqda`);
