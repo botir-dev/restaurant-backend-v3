@@ -17,6 +17,7 @@ const archiveRoutes = require('./modules/archive/archive.routes');
 const dashboardRoutes = require('./modules/dashboard/dashboard.routes');
 const sseRoutes = require('./modules/sse/sse.routes');
 const publicRoutes = require('./modules/public/public.routes');
+const managerRoutes = require('./modules/manager/manager.routes');
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/manager', managerRoutes);
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
