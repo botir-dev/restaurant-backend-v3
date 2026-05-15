@@ -262,7 +262,7 @@ const prepareItem = async (req, res) => {
     if (orderResult.rows.length === 0) return error(res, 'Buyurtma topilmadi', 404);
 
     const order = orderResult.rows[0];
-    const allowedTypes = getAllowedTypes(role, extra_permissions);
+    const allowedTypes = await getAllowedTypes(role, extra_permissions, req.branchId);
 
     // 1) item_id bo'yicha qidirish
     // 2) Topilmasa — product_id bo'yicha tayyor bo'lmagan birinchisini topish
