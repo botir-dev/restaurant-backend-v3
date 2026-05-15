@@ -17,6 +17,7 @@ const archiveRoutes = require('./modules/archive/archive.routes');
 const dashboardRoutes = require('./modules/dashboard/dashboard.routes');
 const sseRoutes = require('./modules/sse/sse.routes');
 const publicRoutes = require('./modules/public/public.routes');
+const managerRoutes = require('./modules/manager/manager.routes');
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use('/orders', orderRoutes);
 app.use('/payments', paymentRoutes);
 app.use('/archive', archiveRoutes);
 app.use('/dashboard', dashboardRoutes);
+app.use('/manager', managerRoutes);
 
 // 404
 app.use((req, res) => {
