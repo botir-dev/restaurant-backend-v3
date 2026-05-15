@@ -3,7 +3,6 @@ const pool = require('../../config/database');
 const { success, created, error } = require('../../utils/response.utils');
 const sseManager = require('../sse/sse.manager');
 
-// Filial hodimlarini olish (SSE uchun)
 const getBranchUsers = async (branchId) => {
   const result = await pool.query(
     `SELECT id, role, extra_permissions FROM users WHERE branch_id = $1 AND is_active = TRUE`,
@@ -12,7 +11,6 @@ const getBranchUsers = async (branchId) => {
   return result.rows;
 };
 
-// GET /orders?status=preparing
 const getOrders = async (req, res) => {
   const { status } = req.query;
   const { role, extra_permissions, user_id } = req.user;
@@ -25,7 +23,6 @@ const getOrders = async (req, res) => {
 
     if (status) { where += ` AND o.status = $${idx++}`; params.push(status); }
 
-    // Ofitsiant faqat o'z buyurtmalarini ko'radi
     if (role === 'waiter') {
       where += ` AND o.waiter_id = $${idx++}`;
       params.push(user_id);
@@ -40,7 +37,6 @@ const getOrders = async (req, res) => {
 
     let orders = result.rows;
 
-    // Tayyorlovchilar faqat o'z turlaridagi itemlarni ko'radi
     if (isPreparerRole(role)) {
       const allowedTypes = getAllowedTypes(role, extra_permissions);
       orders = orders
@@ -59,7 +55,6 @@ const getOrders = async (req, res) => {
   }
 };
 
-// POST /orders — Ofitsiant yoki QR emas, balki ofitsiant orqali
 const createOrder = async (req, res) => {
   const { table_id, guest_count, items, waiter_id, is_from_qr } = req.body;
   if (!table_id || !items || !items.length) {
@@ -67,7 +62,6 @@ const createOrder = async (req, res) => {
   }
 
   try {
-    // Mahsulotlarni DBdan olish (narx va nom uchun)
     const productIds = items.map(i => i.product_id);
     const productsResult = await pool.query(
       `SELECT id, name, price, type, is_available FROM products
@@ -77,13 +71,13 @@ const createOrder = async (req, res) => {
     const productsMap = {};
     productsResult.rows.forEach(p => { productsMap[p.id] = p; });
 
-    // Har bir itemni tekshirish va boyitish
     const enrichedItems = [];
     for (const item of items) {
       const product = productsMap[item.product_id];
       if (!product) return error(res, `Mahsulot topilmadi: ${item.product_id}`);
       if (!product.is_available) return error(res, `Mahsulot mavjud emas: ${product.name}`);
       enrichedItems.push({
+        item_id: uuidv4(),          // <-- har bir itemga unique ID
         product_id: product.id,
         name: product.name,
         price: product.price,
@@ -93,7 +87,6 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // QR buyurtma uchun waiter_id beriladi (mijoz tanlagan ofitsiant)
     const assignedWaiter = is_from_qr ? waiter_id : req.user.user_id;
     if (!assignedWaiter) return error(res, 'Ofitsiant ID talab qilinadi');
 
@@ -109,14 +102,12 @@ const createOrder = async (req, res) => {
 
     const order = result.rows[0];
 
-    // Stol band qilish
     await pool.query(
       `UPDATE tables SET is_occupied = TRUE, current_order_id = $1, updated_at = NOW()
        WHERE id = $2`,
       [orderId, table_id]
     );
 
-    // SSE: QR buyurtma kelganda ofitsiantga xabar
     if (is_from_qr) {
       sseManager.sendToUser(assignedWaiter, 'qr_order', {
         message: 'Mijoz QR orqali buyurtma berdi',
@@ -133,7 +124,6 @@ const createOrder = async (req, res) => {
   }
 };
 
-// PUT /orders/:id — itemlarni tahrirlash
 const updateOrder = async (req, res) => {
   const { id } = req.params;
   const { items, guest_count } = req.body;
@@ -153,7 +143,6 @@ const updateOrder = async (req, res) => {
     let newStatus = order.status;
 
     if (items) {
-      // Mahsulotlarni boyitish
       const productIds = items.map(i => i.product_id);
       const productsResult = await pool.query(
         `SELECT id, name, price, type FROM products WHERE id = ANY($1) AND branch_id = $2`,
@@ -165,6 +154,7 @@ const updateOrder = async (req, res) => {
       const enrichedItems = items.map(item => {
         const product = productsMap[item.product_id];
         return {
+          item_id: item.item_id || uuidv4(),   // <-- mavjud item_id saqlash, yangilarga uuid
           product_id: product.id,
           name: product.name,
           price: product.price,
@@ -174,7 +164,6 @@ const updateOrder = async (req, res) => {
         };
       });
 
-      // Agar ready_to_serve va yangi item qo'shilsa — preparing ga qaytarish
       const hasNewUnprepared = enrichedItems.some(i => !i.is_prepared);
       if (order.status === 'ready_to_serve' && hasNewUnprepared) {
         newStatus = 'preparing';
@@ -187,8 +176,6 @@ const updateOrder = async (req, res) => {
         [JSON.stringify(enrichedItems), newStatus, guest_count, id]
       );
 
-      // TZ: preparing yoki ready_to_serve holatida yangi (tayyor bo'lmagan) item
-      // qo'shilsa, tayyorlovchilarga SSE yuboriladi
       const isActiveOrder = ['preparing', 'ready_to_serve'].includes(order.status);
       const newUnpreparedItems = enrichedItems.filter(i => !i.is_prepared);
       if (isActiveOrder && newUnpreparedItems.length > 0) {
@@ -217,7 +204,6 @@ const updateOrder = async (req, res) => {
   }
 };
 
-// PATCH /orders/:id/send — Tayyorlovchilarga yuborish
 const sendToKitchen = async (req, res) => {
   const { id } = req.params;
   try {
@@ -230,8 +216,6 @@ const sendToKitchen = async (req, res) => {
     if (result.rows.length === 0) return error(res, 'Buyurtma topilmadi yoki yuborib bo\'lmaydi', 404);
 
     const order = result.rows[0];
-
-    // SSE: tayyorlovchilarga xabar
     const branchUsers = await getBranchUsers(req.branchId);
     const itemTypes = [...new Set(order.items.map(i => i.type))];
     sseManager.sendToPreparers(branchUsers, itemTypes, 'new_order', {
@@ -248,8 +232,6 @@ const sendToKitchen = async (req, res) => {
   }
 };
 
-// PATCH /orders/:id/complete — payment_pending ga o'tkazish
-// TZ 9.3: stol payment_pending da HALI bo'shalmaydi — kassir paid qilganda bo'shaydi
 const completeOrder = async (req, res) => {
   const { id } = req.params;
   try {
@@ -260,9 +242,6 @@ const completeOrder = async (req, res) => {
       [id, req.branchId]
     );
     if (result.rows.length === 0) return error(res, 'Buyurtma hali tayyor emas', 400);
-
-    // Stol bu yerda bo'shatilmaydi — kassir "Hisobni yopish" bosganda bo'shaydi
-
     return success(res, result.rows[0], 'Buyurtma yakunlandi, to\'lov kutilmoqda');
   } catch (err) {
     console.error(err);
@@ -270,7 +249,6 @@ const completeOrder = async (req, res) => {
   }
 };
 
-// PATCH /orders/:id/items/:itemId/prepare — Tayyorlovchi itemni belgilaydi
 const prepareItem = async (req, res) => {
   const { id, itemId } = req.params;
   const { role, extra_permissions } = req.user;
@@ -286,8 +264,13 @@ const prepareItem = async (req, res) => {
     const order = orderResult.rows[0];
     const allowedTypes = getAllowedTypes(role, extra_permissions);
 
-    const itemIndex = order.items.findIndex(i => i.product_id === itemId);
-    if (itemIndex === -1) return error(res, 'Item topilmadi', 404);
+    // 1) item_id bo'yicha qidirish
+    // 2) Topilmasa — product_id bo'yicha tayyor bo'lmagan birinchisini topish
+    let itemIndex = order.items.findIndex(i => i.item_id === itemId);
+    if (itemIndex === -1) {
+      itemIndex = order.items.findIndex(i => i.product_id === itemId && !i.is_prepared);
+    }
+    if (itemIndex === -1) return error(res, 'Item topilmadi yoki allaqachon tayyor', 404);
 
     const item = order.items[itemIndex];
     if (!allowedTypes.includes(item.type)) {
@@ -296,7 +279,6 @@ const prepareItem = async (req, res) => {
 
     order.items[itemIndex].is_prepared = true;
 
-    // Barcha itemlar tayyormi?
     const allPrepared = order.items.every(i => i.is_prepared);
     const newStatus = allPrepared ? 'ready_to_serve' : order.status;
 
@@ -305,7 +287,6 @@ const prepareItem = async (req, res) => {
       [JSON.stringify(order.items), newStatus, id]
     );
 
-    // SSE: barcha tayyor bo'lsa ofitsiantga xabar
     if (allPrepared) {
       sseManager.sendToUser(order.waiter_id, 'order_ready', {
         message: 'Buyurtma tayyor!',
@@ -321,7 +302,6 @@ const prepareItem = async (req, res) => {
   }
 };
 
-// DELETE /orders/:id — Buyurtmani bekor qilish
 const cancelOrder = async (req, res) => {
   const { id } = req.params;
   try {
