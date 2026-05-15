@@ -21,7 +21,29 @@ const initDB = async () => {
       console.log('DB sxemasi allaqachon mavjud');
     }
 
-    // 2. Yangi jadvallarni qo'shish — har safar tekshiriladi
+    // 2. MIGRATION: users.role ENUM -> TEXT
+    // Bu custom rollarni saqlash imkonini beradi
+    const roleColType = await pool.query(`
+      SELECT data_type FROM information_schema.columns
+      WHERE table_name = 'users' AND column_name = 'role'
+    `);
+    if (roleColType.rows[0]?.data_type !== 'text') {
+      await pool.query(`ALTER TABLE users ALTER COLUMN role TYPE TEXT USING role::TEXT`);
+      console.log('Migration: users.role ENUM -> TEXT');
+    }
+
+    // 3. MIGRATION: products.type ENUM -> TEXT
+    // Bu custom mahsulot turlarini saqlash imkonini beradi
+    const typeColType = await pool.query(`
+      SELECT data_type FROM information_schema.columns
+      WHERE table_name = 'products' AND column_name = 'type'
+    `);
+    if (typeColType.rows[0]?.data_type !== 'text') {
+      await pool.query(`ALTER TABLE products ALTER COLUMN type TYPE TEXT USING type::TEXT`);
+      console.log('Migration: products.type ENUM -> TEXT');
+    }
+
+    // 4. Yangi jadvallarni qo'shish
     await pool.query(`
       CREATE TABLE IF NOT EXISTS custom_roles (
         id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -45,9 +67,9 @@ const initDB = async () => {
         UNIQUE (branch_id, key)
       )
     `);
-    console.log('Qo\'shimcha jadvallar tekshirildi');
+    console.log('Jadvallar tekshirildi');
 
-    // 3. Super admin
+    // 5. Super admin
     const username = process.env.SUPER_ADMIN_USERNAME || 'superadmin';
     const password = process.env.SUPER_ADMIN_PASSWORD || 'Admin@12345';
 
@@ -56,10 +78,7 @@ const initDB = async () => {
       console.log('Eski super admin o\'chirildi');
     }
 
-    const adminCheck = await pool.query(
-      `SELECT id FROM users WHERE role = 'super_admin' LIMIT 1`
-    );
-
+    const adminCheck = await pool.query(`SELECT id FROM users WHERE role = 'super_admin' LIMIT 1`);
     if (adminCheck.rows.length === 0) {
       const passwordHash = await bcrypt.hash(password, 12);
       await pool.query(
@@ -78,11 +97,11 @@ const initDB = async () => {
 
   } catch (err) {
     console.error('DB init xatosi:', err.message);
-    process.exit(1); // Jiddiy xato bo'lsa serverni to'xtatamiz
+    process.exit(1);
   }
 };
 
-// initDB LISTEN DAN OLDIN ishlaydi — server so'rov qabul qilishdan oldin DB tayyor bo'ladi
+// initDB LISTEN DAN OLDIN ishlaydi
 initDB().then(() => {
   app.listen(PORT, () => {
     console.log(`Server ${PORT}-portda ishlamoqda`);
