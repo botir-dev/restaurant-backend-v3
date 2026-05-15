@@ -114,6 +114,7 @@ router.post('/orders', async (req, res) => {
       const product = productsMap[item.product_id];
       if (!product) return error(res, `Mahsulot mavjud emas: ${item.product_id}`);
       enrichedItems.push({
+        item_id: uuidv4(),
         product_id: product.id,
         name: product.name,
         price: product.price,
