@@ -11,8 +11,8 @@ const PORT = process.env.PORT || 3000;
 
 const initDB = async () => {
   try {
+    // 1. Asosiy sxema
     const check = await pool.query(`SELECT to_regclass('public.users') as exists`);
-
     if (!check.rows[0].exists) {
       const schema = fs.readFileSync(path.join(__dirname, 'src/config/schema.sql'), 'utf8');
       await pool.query(schema);
@@ -21,10 +21,36 @@ const initDB = async () => {
       console.log('DB sxemasi allaqachon mavjud');
     }
 
+    // 2. Yangi jadvallarni qo'shish — har safar tekshiriladi
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS custom_roles (
+        id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+        branch_id     UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+        key           VARCHAR(100) NOT NULL,
+        label         VARCHAR(200) NOT NULL,
+        product_type_key VARCHAR(100),
+        created_at    TIMESTAMP DEFAULT NOW(),
+        UNIQUE (branch_id, key)
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS custom_product_types (
+        id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+        branch_id     UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+        key           VARCHAR(100) NOT NULL,
+        label         VARCHAR(200) NOT NULL,
+        created_at    TIMESTAMP DEFAULT NOW(),
+        UNIQUE (branch_id, key)
+      )
+    `);
+    console.log('Qo\'shimcha jadvallar tekshirildi');
+
+    // 3. Super admin
     const username = process.env.SUPER_ADMIN_USERNAME || 'superadmin';
     const password = process.env.SUPER_ADMIN_PASSWORD || 'Admin@12345';
 
-    // RESET_SUPER_ADMIN=true bo'lsa — eski adminni o'chirib qayta yaratish
     if (process.env.RESET_SUPER_ADMIN === 'true') {
       await pool.query(`DELETE FROM users WHERE role = 'super_admin'`);
       console.log('Eski super admin o\'chirildi');
@@ -52,11 +78,14 @@ const initDB = async () => {
 
   } catch (err) {
     console.error('DB init xatosi:', err.message);
+    process.exit(1); // Jiddiy xato bo'lsa serverni to'xtatamiz
   }
 };
 
-app.listen(PORT, async () => {
-  console.log(`Server ${PORT}-portda ishlamoqda`);
-  await initDB();
-  startCronJobs();
+// initDB LISTEN DAN OLDIN ishlaydi — server so'rov qabul qilishdan oldin DB tayyor bo'ladi
+initDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server ${PORT}-portda ishlamoqda`);
+    startCronJobs();
+  });
 });
