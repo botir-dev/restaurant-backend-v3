@@ -38,8 +38,20 @@ const getOrders = async (req, res) => {
     let orders = result.rows;
 
     if (isPreparerRole(role)) {
-      // getAllowedTypes ichida normalize qilinadi
       const allowedTypes = await getAllowedTypes(role, extra_permissions, req.branchId);
+
+      // Debug log — muammoni topish uchun
+      console.log('[KITCHEN DEBUG]', {
+        role,
+        extra_permissions,
+        branchId: req.branchId,
+        allowedTypes,
+        totalOrders: orders.length,
+        preparingOrders: orders.filter(o => ['preparing','ready_to_serve'].includes(o.status)).length,
+        allStatuses: orders.map(o => o.status),
+        allItemTypes: orders.flatMap(o => o.items.map(i => i.type)),
+      });
+
       orders = orders
         .filter(o => ['preparing', 'ready_to_serve'].includes(o.status))
         .map(o => ({
