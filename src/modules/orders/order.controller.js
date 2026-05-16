@@ -38,7 +38,8 @@ const getOrders = async (req, res) => {
     let orders = result.rows;
 
     if (isPreparerRole(role)) {
-      const allowedTypes = getAllowedTypes(role, extra_permissions);
+      // getAllowedTypes ichida normalize qilinadi
+      const allowedTypes = await getAllowedTypes(role, extra_permissions, req.branchId);
       orders = orders
         .filter(o => ['preparing', 'ready_to_serve'].includes(o.status))
         .map(o => ({
