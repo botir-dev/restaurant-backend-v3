@@ -63,13 +63,15 @@ router.get('/run-migration', async (req, res) => {
     `);
     results.push({ check: 'users.extra_permissions udt_name', value: col.rows[0]?.udt_name });
 
-    if (col.rows[0]?.udt_name === 'product_type') {
+    const udtName = col.rows[0]?.udt_name;
+    // _product_type = product_type[] (PostgreSQL array enum), varchar = TEXT[]
+    if (udtName !== 'varchar' && udtName !== 'text') {
       await pool.query(`
         ALTER TABLE users ALTER COLUMN extra_permissions TYPE TEXT[] USING extra_permissions::TEXT[]
       `);
       results.push({ migration: 'extra_permissions -> TEXT[]', status: 'OK' });
     } else {
-      results.push({ migration: 'extra_permissions', status: 'Already TEXT[]' });
+      results.push({ migration: 'extra_permissions', status: 'Already TEXT[]', udt: udtName });
     }
   } catch (e) {
     results.push({ migration: 'extra_permissions', error: e.message });
