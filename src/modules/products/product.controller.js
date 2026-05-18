@@ -106,7 +106,7 @@ const toggleAvailability = async (req, res) => {
 
     if (role !== 'manager' && role !== 'storekeeper') {
       const { getAllowedTypes } = require('../../utils/roles.utils');
-      const allowed = getAllowedTypes(role, extra_permissions);
+      const allowed = await getAllowedTypes(role, extra_permissions, req.branchId);
       if (!allowed.includes(productType)) {
         return error(res, 'Siz bu mahsulotni o\'zgartira olmaysiz', 403);
       }
