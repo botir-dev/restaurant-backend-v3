@@ -12,7 +12,7 @@ const getStaff = async (req, res) => {
     const result = await pool.query(
       `SELECT id, full_name, username, phone, role, extra_permissions, is_active, created_at
        FROM users
-       WHERE branch_id = $1 AND restaurant_id = $2 AND role != 'manager'
+       WHERE branch_id = $1 AND restaurant_id = $2 AND role != 'manager' AND is_active = TRUE
        ORDER BY created_at DESC`,
       [req.branchId, req.restaurantId]
     );
