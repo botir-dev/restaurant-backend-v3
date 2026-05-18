@@ -229,14 +229,22 @@ const sendToKitchen = async (req, res) => {
     if (result.rows.length === 0) return error(res, 'Buyurtma topilmadi yoki yuborib bo\'lmaydi', 404);
 
     const order = result.rows[0];
-    const branchUsers = await getBranchUsers(req.branchId);
-    const itemTypes = [...new Set(order.items.map(i => i.type))];
-    sseManager.sendToPreparers(branchUsers, itemTypes, 'new_order', {
-      message: 'Yangi buyurtma keldi',
-      order_id: order.id,
-      table_id: order.table_id,
-      items: order.items
-    });
+
+    // SSE xatosi asosiy jarayonni to'xtatmasin — try/catch bilan
+    try {
+      const branchUsers = await getBranchUsers(req.branchId);
+      // items JSON yoki array bo'lishi mumkin
+      const itemsArr = Array.isArray(order.items) ? order.items : JSON.parse(order.items || '[]');
+      const itemTypes = [...new Set(itemsArr.map(i => i.type).filter(Boolean))];
+      sseManager.sendToPreparers(branchUsers, itemTypes, 'new_order', {
+        message: 'Yangi buyurtma keldi',
+        order_id: order.id,
+        table_id: order.table_id,
+        items: itemsArr
+      });
+    } catch (sseErr) {
+      console.error('SSE xatosi (kritik emas):', sseErr.message);
+    }
 
     return success(res, order, 'Buyurtma tayyorlovchilarga yuborildi');
   } catch (err) {
