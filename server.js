@@ -1,4 +1,5 @@
 require('dotenv').config();
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
@@ -6,6 +7,8 @@ const { v4: uuidv4 } = require('uuid');
 const app = require('./src/app');
 const pool = require('./src/config/database');
 const { startCronJobs } = require('./src/utils/cron.utils');
+const { initWebSocket } = require('./src/modules/ws/ws.manager');
+const { handleUpgrade } = require('./src/modules/ws/ws.routes');
 
 const PORT = process.env.PORT || 3000;
 
@@ -29,7 +32,6 @@ const initDB = async () => {
       `);
       const isEnum = roleCol.rows[0]?.udt_name === 'user_role';
       if (isEnum) {
-        // ENUM ni TEXT ga o'girish — to'g'ri usul
         await pool.query(`ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(100) USING role::TEXT`);
         console.log('Migration OK: users.role -> VARCHAR(100)');
       }
@@ -52,7 +54,7 @@ const initDB = async () => {
       console.log('products.type migration:', e.message);
     }
 
-    // 4. MIGRATION: extra_permissions ARRAY -> TEXT[]  (agar hali o'zgartirilmagan bo'lsa)
+    // 4. MIGRATION: extra_permissions ARRAY -> TEXT[]
     try {
       const permCol = await pool.query(`
         SELECT udt_name FROM information_schema.columns
@@ -98,7 +100,7 @@ const initDB = async () => {
 
     if (process.env.RESET_SUPER_ADMIN === 'true') {
       await pool.query(`DELETE FROM users WHERE role = 'super_admin'`);
-      console.log('Eski super admin o\'chirildi');
+      console.log("Eski super admin o'chirildi");
     }
 
     const adminCheck = await pool.query(`SELECT id FROM users WHERE role = 'super_admin' LIMIT 1`);
@@ -121,8 +123,18 @@ const initDB = async () => {
 };
 
 initDB().then(() => {
-  app.listen(PORT, () => {
+  // HTTP server yaratish (WebSocket ham shu server orqali ishlaydi)
+  const httpServer = http.createServer(app);
+
+  // WebSocket serverini ishga tushirish
+  const wsServer = initWebSocket(httpServer);
+
+  // HTTP Upgrade so'rovlarini boshqarish (WebSocket handshake)
+  httpServer.on('upgrade', handleUpgrade(wsServer));
+
+  httpServer.listen(PORT, () => {
     console.log(`Server ${PORT}-portda ishlamoqda`);
+    console.log(`WebSocket: ws://localhost:${PORT}/ws?token=ACCESS_TOKEN`);
     startCronJobs();
   });
 });
