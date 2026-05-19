@@ -1,7 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../../config/database');
 const { success, created, error } = require('../../utils/response.utils');
-const sseManager = require('../sse/sse.manager');
+const wsManager = require('../ws/ws.manager');
 
 const getBranchUsers = async (branchId) => {
   const result = await pool.query(
@@ -122,7 +122,7 @@ const createOrder = async (req, res) => {
     );
 
     if (is_from_qr) {
-      sseManager.sendToUser(assignedWaiter, 'qr_order', {
+      wsManager.sendToUser(assignedWaiter, 'qr_order', {
         message: 'Mijoz QR orqali buyurtma berdi',
         order_id: orderId,
         table_id,
@@ -194,7 +194,7 @@ const updateOrder = async (req, res) => {
       if (isActiveOrder && newUnpreparedItems.length > 0) {
         const branchUsers = await getBranchUsers(req.branchId);
         const newTypes = [...new Set(newUnpreparedItems.map(i => i.type))];
-        sseManager.sendToPreparers(branchUsers, newTypes, 'new_order', {
+        wsManager.sendToPreparers(branchUsers, newTypes, 'new_order', {
           message: "Buyurtmaga yangi mahsulot qo'shildi",
           order_id: id,
           table_id: order.table_id,
@@ -236,7 +236,7 @@ const sendToKitchen = async (req, res) => {
       // items JSON yoki array bo'lishi mumkin
       const itemsArr = Array.isArray(order.items) ? order.items : JSON.parse(order.items || '[]');
       const itemTypes = [...new Set(itemsArr.map(i => i.type).filter(Boolean))];
-      sseManager.sendToPreparers(branchUsers, itemTypes, 'new_order', {
+      wsManager.sendToPreparers(branchUsers, itemTypes, 'new_order', {
         message: 'Yangi buyurtma keldi',
         order_id: order.id,
         table_id: order.table_id,
@@ -309,7 +309,7 @@ const prepareItem = async (req, res) => {
     );
 
     if (allPrepared) {
-      sseManager.sendToUser(order.waiter_id, 'order_ready', {
+      wsManager.sendToUser(order.waiter_id, 'order_ready', {
         message: 'Buyurtma tayyor!',
         order_id: id,
         table_id: order.table_id
