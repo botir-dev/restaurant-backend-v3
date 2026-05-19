@@ -15,7 +15,7 @@ const orderRoutes = require('./modules/orders/order.routes');
 const paymentRoutes = require('./modules/payments/payment.routes');
 const archiveRoutes = require('./modules/archive/archive.routes');
 const dashboardRoutes = require('./modules/dashboard/dashboard.routes');
-const sseRoutes = require('./modules/sse/sse.routes');
+const wsRoutes = require('./modules/ws/ws.routes');
 const publicRoutes = require('./modules/public/public.routes');
 const managerRoutes = require('./modules/manager/manager.routes');
 const migrationRoutes = require('./modules/admin/migration.routes');
@@ -37,7 +37,9 @@ app.use(limiter);
 
 // Public routes (no auth)
 app.use('/public', publicRoutes);
-app.use('/sse', sseRoutes);
+
+// WebSocket status endpoint
+app.use('/ws', wsRoutes);
 
 // Auth
 app.use('/auth', authRoutes);
