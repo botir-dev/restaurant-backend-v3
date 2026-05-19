@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../../config/database');
 const { success, error, paginate } = require('../../utils/response.utils');
 
+const wsManager = require('../ws/ws.manager');
 /**
  * GET /public/menu/:branch_id
  * Autentifikatsiyasiz — QR orqali mijoz uchun menyu
@@ -81,7 +82,6 @@ router.post('/orders', async (req, res) => {
   }
 
   const { v4: uuidv4 } = require('uuid');
-  const sseManager = require('../sse/sse.manager');
 
   try {
     // Waiter tekshirish
@@ -138,7 +138,7 @@ router.post('/orders', async (req, res) => {
     );
 
     // SSE: ofitsiantga darhol xabar (band bo'lsa ham)
-    sseManager.sendToUser(waiter_id, 'qr_order', {
+    wsManager.sendToUser(waiter_id, 'qr_order', {
       message: 'Mijoz QR orqali buyurtma berdi!',
       order_id: orderId,
       table_id,
