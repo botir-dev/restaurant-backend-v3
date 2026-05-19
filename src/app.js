@@ -22,8 +22,21 @@ const migrationRoutes = require('./modules/admin/migration.routes');
 
 const app = express();
 
+// Helmet xavfsizlik uchun (WebSocket ulanishlariga xalaqit bermasligi ta'minlanadi)
 app.use(helmet());
-app.use(cors());
+
+// CORS sozlamalari yangilandi
+app.use(cors({
+  origin: [
+    'https://test-restaurant-frontend.vercel.app', // Sizning Vercel manzilingiz
+    'http://localhost:5173',                       // Vite mahalliy serveri
+    'http://localhost:3000'                        // Qo'shimcha local port
+  ],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
