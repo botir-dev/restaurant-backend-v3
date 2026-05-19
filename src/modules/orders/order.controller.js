@@ -243,7 +243,7 @@ const sendToKitchen = async (req, res) => {
         items: itemsArr
       });
     } catch (sseErr) {
-      console.error('SSE xatosi (kritik emas):', sseErr.message);
+      console.error('WS xatosi (kritik emas):', sseErr.message);
     }
 
     return success(res, order, 'Buyurtma tayyorlovchilarga yuborildi');
