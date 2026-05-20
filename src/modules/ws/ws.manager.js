@@ -1,11 +1,6 @@
-/**
- * WebSocket menejeri — SSE dan to'liq o'tkazildi
- * noServer: true — chunki handleUpgrade orqali HTTP Upgrade qo'lda boshqariladi
- */
-
 const { WebSocketServer, WebSocket } = require('ws');
 
-const clients = new Map(); // userId -> WebSocket
+const clients = new Map();
 let wss = null;
 
 const initWebSocket = () => {
@@ -24,16 +19,12 @@ const initWebSocket = () => {
     ws.on('close', () => {
       if (ws._userId && clients.get(ws._userId) === ws) {
         clients.delete(ws._userId);
-        console.log(`WS: Uzildi [${ws._userId}]. Jami: ${clients.size}`);
       }
     });
 
-    ws.on('error', (err) => {
-      console.error('WS client xatosi:', err.message);
-    });
+    ws.on('error', () => {});
   });
 
-  console.log('WebSocket server tayyor (noServer mode)');
   return wss;
 };
 
@@ -42,14 +33,10 @@ const getWss = () => wss;
 const addClient = (userId, ws) => {
   const existing = clients.get(userId);
   if (existing && existing !== ws) {
-    try {
-      existing.send(JSON.stringify({ type: 'disconnected', reason: 'new_connection' }));
-      existing.terminate();
-    } catch (_) {}
+    try { existing.terminate(); } catch (_) {}
   }
   ws._userId = userId;
   clients.set(userId, ws);
-  console.log(`WS: Ulandi [${userId}]. Jami: ${clients.size}`);
 };
 
 const removeClient = (userId) => {
@@ -61,8 +48,7 @@ const sendToUser = (userId, event, data) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
       ws.send(JSON.stringify({ type: event, data }));
-    } catch (err) {
-      console.error(`WS: Yuborishda xato [${userId}]:`, err.message);
+    } catch (_) {
       removeClient(userId);
     }
   }
@@ -88,12 +74,6 @@ const sendToPreparers = (branchUsers, itemTypes, event, data) => {
 const getClientCount = () => clients.size;
 
 module.exports = {
-  initWebSocket,
-  getWss,
-  addClient,
-  removeClient,
-  sendToUser,
-  sendToBranchRole,
-  sendToPreparers,
-  getClientCount,
+  initWebSocket, getWss, addClient, removeClient,
+  sendToUser, sendToBranchRole, sendToPreparers, getClientCount,
 };
