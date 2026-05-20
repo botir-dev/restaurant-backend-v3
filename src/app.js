@@ -35,16 +35,9 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Public routes (no auth)
 app.use('/public', publicRoutes);
-
-// WebSocket status endpoint
 app.use('/ws', wsRoutes);
-
-// Auth
 app.use('/auth', authRoutes);
-
-// Protected routes
 app.use('/admin', adminRoutes);
 app.use('/restaurants', restaurantRoutes);
 app.use('/branches', branchRoutes);
@@ -58,18 +51,12 @@ app.use('/dashboard', dashboardRoutes);
 app.use('/manager', managerRoutes);
 app.use('/migration', migrationRoutes);
 
-// 404
 app.use((req, res) => {
-  res.status(404).json({ success: false, message: "Endpoint topilmadi" });
+  res.status(404).json({ success: false, message: 'Endpoint topilmadi' });
 });
 
-// Global error handler
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || "Server xatosi"
-  });
+  res.status(err.status || 500).json({ success: false, message: err.message || 'Server xatosi' });
 });
 
 module.exports = app;
