@@ -41,16 +41,6 @@ const getOrders = async (req, res) => {
       const allowedTypes = await getAllowedTypes(role, extra_permissions, req.branchId);
 
       // Debug log — muammoni topish uchun
-      console.log('[KITCHEN DEBUG]', {
-        role,
-        extra_permissions,
-        branchId: req.branchId,
-        allowedTypes,
-        totalOrders: orders.length,
-        preparingOrders: orders.filter(o => ['preparing','ready_to_serve'].includes(o.status)).length,
-        allStatuses: orders.map(o => o.status),
-        allItemTypes: orders.flatMap(o => o.items.map(i => i.type)),
-      });
 
       orders = orders
         .filter(o => ['preparing', 'ready_to_serve'].includes(o.status))
@@ -63,7 +53,6 @@ const getOrders = async (req, res) => {
 
     return success(res, orders);
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -132,7 +121,6 @@ const createOrder = async (req, res) => {
 
     return created(res, order, 'Buyurtma yaratildi');
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -212,7 +200,6 @@ const updateOrder = async (req, res) => {
     const updated = await pool.query(`SELECT * FROM orders WHERE id = $1`, [id]);
     return success(res, updated.rows[0], 'Buyurtma yangilandi');
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -243,12 +230,10 @@ const sendToKitchen = async (req, res) => {
         items: itemsArr
       });
     } catch (sseErr) {
-      console.error('WS xatosi (kritik emas):', sseErr.message);
     }
 
     return success(res, order, 'Buyurtma tayyorlovchilarga yuborildi');
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -265,7 +250,6 @@ const completeOrder = async (req, res) => {
     if (result.rows.length === 0) return error(res, 'Buyurtma hali tayyor emas', 400);
     return success(res, result.rows[0], 'Buyurtma yakunlandi, to\'lov kutilmoqda');
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -318,7 +302,6 @@ const prepareItem = async (req, res) => {
 
     return success(res, { order_id: id, all_prepared: allPrepared, status: newStatus }, 'Item tayyor deb belgilandi');
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -342,7 +325,6 @@ const cancelOrder = async (req, res) => {
 
     return success(res, {}, 'Buyurtma bekor qilindi');
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
