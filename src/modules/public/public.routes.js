@@ -43,7 +43,6 @@ router.get('/menu/:branch_id', async (req, res) => {
 
     return paginate(res, grouped, total, page, limit, 'Menyu');
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 });
@@ -65,7 +64,6 @@ router.get('/waiters/:branch_id', async (req, res) => {
     // Band yoki bo'sh farqi yo'q — buyurtma har qanday holda ofitsiantga biriktiriladi
     return success(res, result.rows, 'Ofitsiantlar ro\'yxati');
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 });
@@ -151,7 +149,6 @@ router.post('/orders', async (req, res) => {
       data: { order_id: orderId }
     });
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 });
