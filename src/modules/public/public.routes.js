@@ -2,12 +2,10 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
 const { success, error, paginate } = require('../../utils/response.utils');
-
 const wsManager = require('../ws/ws.manager');
+
 /**
  * GET /public/menu/:branch_id
- * Autentifikatsiyasiz — QR orqali mijoz uchun menyu
- * Pagination qo'llaniladi
  */
 router.get('/menu/:branch_id', async (req, res) => {
   const { branch_id } = req.params;
@@ -34,7 +32,6 @@ router.get('/menu/:branch_id', async (req, res) => {
       [...params, limit, offset]
     );
 
-    // Typelar bo'yicha guruhlash
     const grouped = {};
     result.rows.forEach(p => {
       if (!grouped[p.type]) grouped[p.type] = [];
@@ -49,8 +46,6 @@ router.get('/menu/:branch_id', async (req, res) => {
 
 /**
  * GET /public/waiters/:branch_id
- * Autentifikatsiyasiz — QR buyurtma berishda ofitsiantlar ro'yxati
- * Mijoz o'z ofitsiantini tanlaydi
  */
 router.get('/waiters/:branch_id', async (req, res) => {
   const { branch_id } = req.params;
@@ -61,7 +56,6 @@ router.get('/waiters/:branch_id', async (req, res) => {
        ORDER BY full_name`,
       [branch_id]
     );
-    // Band yoki bo'sh farqi yo'q — buyurtma har qanday holda ofitsiantga biriktiriladi
     return success(res, result.rows, 'Ofitsiantlar ro\'yxati');
   } catch (err) {
     return error(res, 'Server xatosi', 500);
@@ -70,16 +64,18 @@ router.get('/waiters/:branch_id', async (req, res) => {
 
 /**
  * POST /public/orders
- * Autentifikatsiyasiz — Mijoz QR orqali buyurtma beradi
- * Tanlangan ofitsiantga to'g'ridan-to'g'ri biriktiriladi
+ * QR orqali mijoz buyurtma beradi — darhol 'preparing' statusida yaratiladi
+ * va oshxona xodimlariga WS xabar yuboriladi (ofitsiant kutmasdan)
  */
 router.post('/orders', async (req, res) => {
   const { branch_id, table_id, waiter_id, items, guest_count } = req.body;
+
   if (!branch_id || !table_id || !waiter_id || !items || !items.length) {
     return error(res, 'branch_id, table_id, waiter_id va mahsulotlar talab qilinadi');
   }
 
   const { v4: uuidv4 } = require('uuid');
+  const { ROLE_PRODUCT_MAP } = require('../../utils/roles.utils');
 
   try {
     // Waiter tekshirish
@@ -123,19 +119,28 @@ router.post('/orders', async (req, res) => {
     }
 
     const orderId = uuidv4();
+
+    // ✅ 'preparing' — ofitsiant tasdiqlashini kutmasdan darhol oshxonaga
     await pool.query(
       `INSERT INTO orders (id, restaurant_id, branch_id, table_id, waiter_id, guest_count, items, is_from_qr, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,'pending')`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,'preparing')`,
       [orderId, restaurantId, branch_id, table_id, waiter_id, guest_count || 1, JSON.stringify(enrichedItems)]
     );
 
     // Stol band qilish
     await pool.query(
-      `UPDATE tables SET is_occupied = TRUE, current_order_id = $1 WHERE id = $2`,
+      `UPDATE tables SET is_occupied = TRUE, current_order_id = $1, updated_at = NOW() WHERE id = $2`,
       [orderId, table_id]
     );
 
-    // SSE: ofitsiantga darhol xabar (band bo'lsa ham)
+    // Filial barcha hodimlarini olish (WS xabar uchun)
+    const branchUsers = await pool.query(
+      `SELECT id, role, extra_permissions FROM users WHERE branch_id = $1 AND is_active = TRUE`,
+      [branch_id]
+    );
+    const users = branchUsers.rows;
+
+    // 1) Ofitsiantga xabar — mijoz buyurtma berdi
     wsManager.sendToUser(waiter_id, 'qr_order', {
       message: 'Mijoz QR orqali buyurtma berdi!',
       order_id: orderId,
@@ -143,9 +148,29 @@ router.post('/orders', async (req, res) => {
       items_count: enrichedItems.length
     });
 
+    // 2) Oshxona xodimlariga xabar — har biri o'z turi bo'yicha
+    // item turlarini ajratib olish
+    const itemTypes = [...new Set(enrichedItems.map(i => i.type))];
+
+    wsManager.sendToPreparers(users, itemTypes, 'new_order', {
+      message: `QR buyurtma: ${enrichedItems.length} ta mahsulot`,
+      order_id: orderId,
+      table_id,
+      items: enrichedItems,
+      items_count: enrichedItems.length
+    });
+
+    // 3) Menejerga ham xabar
+    wsManager.sendToBranchRole(users, ['manager'], 'new_order', {
+      message: `QR buyurtma keldi`,
+      order_id: orderId,
+      table_id,
+      items_count: enrichedItems.length
+    });
+
     return res.status(201).json({
       success: true,
-      message: 'Buyurtmangiz qabul qilindi! Ofitsiant tez orada keladi.',
+      message: 'Buyurtmangiz qabul qilindi! Tayyorlanmoqda...',
       data: { order_id: orderId }
     });
   } catch (err) {
