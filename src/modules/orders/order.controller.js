@@ -11,6 +11,19 @@ const getBranchUsers = async (branchId) => {
   return result.rows;
 };
 
+// ─── Yordamchi: quantity validatsiyasi ───────────────────────
+const validateItems = (items) => {
+  if (!Array.isArray(items) || items.length === 0) return 'Mahsulotlar ro\'yxati bo\'sh';
+  if (items.length > 50) return 'Bir buyurtmada max 50 ta mahsulot';
+  for (const item of items) {
+    const qty = parseInt(item.quantity);
+    if (!Number.isInteger(qty) || qty < 1 || qty > 999) {
+      return 'Har bir mahsulot miqdori 1 dan 999 gacha bo\'lishi kerak';
+    }
+  }
+  return null;
+};
+
 const getOrders = async (req, res) => {
   const { status } = req.query;
   const { role, extra_permissions, user_id } = req.user;
@@ -21,7 +34,12 @@ const getOrders = async (req, res) => {
     const params = [req.branchId, req.restaurantId];
     let idx = 3;
 
-    if (status) { where += ` AND o.status = $${idx++}`; params.push(status); }
+    // status whitelist
+    const VALID_STATUSES = ['pending','preparing','ready_to_serve','payment_pending','paid','cancelled'];
+    if (status && VALID_STATUSES.includes(status)) {
+      where += ` AND o.status = $${idx++}`;
+      params.push(status);
+    }
 
     if (role === 'waiter') {
       where += ` AND o.waiter_id = $${idx++}`;
@@ -39,14 +57,11 @@ const getOrders = async (req, res) => {
 
     if (isPreparerRole(role)) {
       const allowedTypes = await getAllowedTypes(role, extra_permissions, req.branchId);
-
-      // Debug log — muammoni topish uchun
-
       orders = orders
         .filter(o => ['preparing', 'ready_to_serve'].includes(o.status))
         .map(o => ({
           ...o,
-          items: o.items.filter(item => allowedTypes.includes(item.type) && !item.is_prepared)
+          items: o.items.filter(item => allowedTypes.includes(item.type) && !item.is_prepared),
         }))
         .filter(o => o.items.length > 0);
     }
@@ -59,13 +74,34 @@ const getOrders = async (req, res) => {
 
 const createOrder = async (req, res) => {
   const { table_id, guest_count, items, waiter_id, is_from_qr } = req.body;
-  if (!table_id || !items || !items.length) {
-    return error(res, 'Stol va mahsulotlar talab qilinadi');
-  }
+  if (!table_id) return error(res, 'Stol ID talab qilinadi');
 
+  const itemErr = validateItems(items);
+  if (itemErr) return error(res, itemErr);
+
+  const guestCnt = parseInt(guest_count) || 1;
+  if (guestCnt < 1 || guestCnt > 100) return error(res, 'Mehmonlar soni 1-100 orasida bo\'lishi kerak');
+
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
+    // ─── RACE CONDITION: stol qulflanadi ──────────────────────
+    const tableResult = await client.query(
+      `SELECT * FROM tables WHERE id = $1 AND branch_id = $2 FOR UPDATE`,
+      [table_id, req.branchId]
+    );
+    if (tableResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return error(res, 'Stol topilmadi', 404);
+    }
+    if (tableResult.rows[0].is_occupied) {
+      await client.query('ROLLBACK');
+      return error(res, 'Stol allaqachon band');
+    }
+
     const productIds = items.map(i => i.product_id);
-    const productsResult = await pool.query(
+    const productsResult = await client.query(
       `SELECT id, name, price, type, is_available FROM products
        WHERE id = ANY($1) AND branch_id = $2`,
       [productIds, req.branchId]
@@ -76,58 +112,68 @@ const createOrder = async (req, res) => {
     const enrichedItems = [];
     for (const item of items) {
       const product = productsMap[item.product_id];
-      if (!product) return error(res, `Mahsulot topilmadi: ${item.product_id}`);
-      if (!product.is_available) return error(res, `Mahsulot mavjud emas: ${product.name}`);
+      if (!product) { await client.query('ROLLBACK'); return error(res, `Mahsulot topilmadi: ${item.product_id}`); }
+      if (!product.is_available) { await client.query('ROLLBACK'); return error(res, `Mahsulot mavjud emas: ${product.name}`); }
       enrichedItems.push({
-        item_id: uuidv4(),          // <-- har bir itemga unique ID
+        item_id:    uuidv4(),
         product_id: product.id,
-        name: product.name,
-        price: product.price,
-        type: product.type,
-        quantity: item.quantity || 1,
-        is_prepared: false
+        name:       product.name,
+        price:      parseFloat(product.price),
+        type:       product.type,
+        quantity:   parseInt(item.quantity) || 1,
+        is_prepared: false,
       });
     }
 
     const assignedWaiter = is_from_qr ? waiter_id : req.user.user_id;
-    if (!assignedWaiter) return error(res, 'Ofitsiant ID talab qilinadi');
+    if (!assignedWaiter) { await client.query('ROLLBACK'); return error(res, 'Ofitsiant ID talab qilinadi'); }
 
     const orderId = uuidv4();
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO orders (id, restaurant_id, branch_id, table_id, waiter_id, guest_count, items, is_from_qr)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
       [orderId, req.restaurantId || req.user.restaurant_id,
        req.branchId || req.user.branch_id,
-       table_id, assignedWaiter, guest_count || 1,
+       table_id, assignedWaiter, guestCnt,
        JSON.stringify(enrichedItems), is_from_qr || false]
     );
 
-    const order = result.rows[0];
-
-    await pool.query(
-      `UPDATE tables SET is_occupied = TRUE, current_order_id = $1, updated_at = NOW()
-       WHERE id = $2`,
+    await client.query(
+      `UPDATE tables SET is_occupied = TRUE, current_order_id = $1, updated_at = NOW() WHERE id = $2`,
       [orderId, table_id]
     );
 
+    await client.query('COMMIT');
+
+    const order = result.rows[0];
     if (is_from_qr) {
       wsManager.sendToUser(assignedWaiter, 'qr_order', {
         message: 'Mijoz QR orqali buyurtma berdi',
-        order_id: orderId,
-        table_id,
-        items_count: enrichedItems.length
+        order_id: orderId, table_id, items_count: enrichedItems.length,
       });
     }
 
     return created(res, order, 'Buyurtma yaratildi');
   } catch (err) {
+    await client.query('ROLLBACK');
     return error(res, 'Server xatosi', 500);
+  } finally {
+    client.release();
   }
 };
 
 const updateOrder = async (req, res) => {
   const { id } = req.params;
   const { items, guest_count } = req.body;
+
+  if (items) {
+    const itemErr = validateItems(items);
+    if (itemErr) return error(res, itemErr);
+  }
+  if (guest_count !== undefined) {
+    const gc = parseInt(guest_count);
+    if (!Number.isInteger(gc) || gc < 1 || gc > 100) return error(res, 'Mehmonlar soni 1-100 orasida bo\'lishi kerak');
+  }
 
   try {
     const orderResult = await pool.query(
@@ -146,35 +192,37 @@ const updateOrder = async (req, res) => {
     if (items) {
       const productIds = items.map(i => i.product_id);
       const productsResult = await pool.query(
-        `SELECT id, name, price, type FROM products WHERE id = ANY($1) AND branch_id = $2`,
+        `SELECT id, name, price, type, is_available FROM products WHERE id = ANY($1) AND branch_id = $2`,
         [productIds, req.branchId]
       );
       const productsMap = {};
       productsResult.rows.forEach(p => { productsMap[p.id] = p; });
 
-      const enrichedItems = items.map(item => {
+      const enrichedItems = [];
+      for (const item of items) {
         const product = productsMap[item.product_id];
-        return {
-          item_id: item.item_id || uuidv4(),   // <-- mavjud item_id saqlash, yangilarga uuid
-          product_id: product.id,
-          name: product.name,
-          price: product.price,
-          type: product.type,
-          quantity: item.quantity || 1,
-          is_prepared: item.is_prepared || false
-        };
-      });
+        if (!product) return error(res, `Mahsulot topilmadi: ${item.product_id}`);
+        // updateOrder da ham is_available tekshiruvi
+        if (!product.is_available) return error(res, `Mahsulot mavjud emas: ${product.name}`);
+        enrichedItems.push({
+          item_id:     item.item_id || uuidv4(),
+          product_id:  product.id,
+          name:        product.name,
+          price:       parseFloat(product.price),
+          type:        product.type,
+          quantity:    parseInt(item.quantity) || 1,
+          is_prepared: item.is_prepared || false,
+        });
+      }
 
       const hasNewUnprepared = enrichedItems.some(i => !i.is_prepared);
-      if (order.status === 'ready_to_serve' && hasNewUnprepared) {
-        newStatus = 'preparing';
-      }
+      if (order.status === 'ready_to_serve' && hasNewUnprepared) newStatus = 'preparing';
 
       await pool.query(
         `UPDATE orders SET items = $1, status = $2,
          guest_count = COALESCE($3, guest_count), updated_at = NOW()
          WHERE id = $4`,
-        [JSON.stringify(enrichedItems), newStatus, guest_count, id]
+        [JSON.stringify(enrichedItems), newStatus, guest_count ? parseInt(guest_count) : null, id]
       );
 
       const isActiveOrder = ['preparing', 'ready_to_serve'].includes(order.status);
@@ -184,16 +232,13 @@ const updateOrder = async (req, res) => {
         const newTypes = [...new Set(newUnpreparedItems.map(i => i.type))];
         wsManager.sendToPreparers(branchUsers, newTypes, 'new_order', {
           message: "Buyurtmaga yangi mahsulot qo'shildi",
-          order_id: id,
-          table_id: order.table_id,
-          items: newUnpreparedItems
+          order_id: id, table_id: order.table_id, items: newUnpreparedItems,
         });
       }
-
     } else if (guest_count) {
       await pool.query(
         `UPDATE orders SET guest_count = $1, updated_at = NOW() WHERE id = $2`,
-        [guest_count, id]
+        [parseInt(guest_count), id]
       );
     }
 
@@ -213,24 +258,18 @@ const sendToKitchen = async (req, res) => {
        RETURNING *`,
       [id, req.branchId]
     );
-    if (result.rows.length === 0) return error(res, 'Buyurtma topilmadi yoki yuborib bo\'lmaydi', 404);
+    if (result.rows.length === 0) return error(res, "Buyurtma topilmadi yoki yuborib bo'lmaydi", 404);
 
     const order = result.rows[0];
-
-    // SSE xatosi asosiy jarayonni to'xtatmasin — try/catch bilan
     try {
       const branchUsers = await getBranchUsers(req.branchId);
-      // items JSON yoki array bo'lishi mumkin
       const itemsArr = Array.isArray(order.items) ? order.items : JSON.parse(order.items || '[]');
       const itemTypes = [...new Set(itemsArr.map(i => i.type).filter(Boolean))];
       wsManager.sendToPreparers(branchUsers, itemTypes, 'new_order', {
         message: 'Yangi buyurtma keldi',
-        order_id: order.id,
-        table_id: order.table_id,
-        items: itemsArr
+        order_id: order.id, table_id: order.table_id, items: itemsArr,
       });
-    } catch (sseErr) {
-    }
+    } catch (_) {}
 
     return success(res, order, 'Buyurtma tayyorlovchilarga yuborildi');
   } catch (err) {
@@ -248,7 +287,7 @@ const completeOrder = async (req, res) => {
       [id, req.branchId]
     );
     if (result.rows.length === 0) return error(res, 'Buyurtma hali tayyor emas', 400);
-    return success(res, result.rows[0], 'Buyurtma yakunlandi, to\'lov kutilmoqda');
+    return success(res, result.rows[0], "Buyurtma yakunlandi, to'lov kutilmoqda");
   } catch (err) {
     return error(res, 'Server xatosi', 500);
   }
@@ -269,8 +308,6 @@ const prepareItem = async (req, res) => {
     const order = orderResult.rows[0];
     const allowedTypes = await getAllowedTypes(role, extra_permissions, req.branchId);
 
-    // 1) item_id bo'yicha qidirish
-    // 2) Topilmasa — product_id bo'yicha tayyor bo'lmagan birinchisini topish
     let itemIndex = order.items.findIndex(i => i.item_id === itemId);
     if (itemIndex === -1) {
       itemIndex = order.items.findIndex(i => i.product_id === itemId && !i.is_prepared);
@@ -283,7 +320,6 @@ const prepareItem = async (req, res) => {
     }
 
     order.items[itemIndex].is_prepared = true;
-
     const allPrepared = order.items.every(i => i.is_prepared);
     const newStatus = allPrepared ? 'ready_to_serve' : order.status;
 
@@ -294,9 +330,7 @@ const prepareItem = async (req, res) => {
 
     if (allPrepared) {
       wsManager.sendToUser(order.waiter_id, 'order_ready', {
-        message: 'Buyurtma tayyor!',
-        order_id: id,
-        table_id: order.table_id
+        message: 'Buyurtma tayyor!', order_id: id, table_id: order.table_id,
       });
     }
 
@@ -309,13 +343,14 @@ const prepareItem = async (req, res) => {
 const cancelOrder = async (req, res) => {
   const { id } = req.params;
   try {
+    // payment_pending ham bloklanadi — kassirning vakolati
     const result = await pool.query(
       `UPDATE orders SET status = 'cancelled', updated_at = NOW()
-       WHERE id = $1 AND branch_id = $2 AND status NOT IN ('paid', 'payment_pending')
+       WHERE id = $1 AND branch_id = $2 AND status NOT IN ('paid', 'payment_pending', 'cancelled')
        RETURNING *`,
       [id, req.branchId]
     );
-    if (result.rows.length === 0) return error(res, 'Buyurtma topilmadi yoki bekor qilib bo\'lmaydi', 400);
+    if (result.rows.length === 0) return error(res, "Buyurtma topilmadi yoki bekor qilib bo'lmaydi", 400);
 
     await pool.query(
       `UPDATE tables SET is_occupied = FALSE, current_order_id = NULL
