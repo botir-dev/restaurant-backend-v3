@@ -1,16 +1,29 @@
 const express = require('express');
-const router = express.Router();
-const pool = require('../../config/database');
+const router  = express.Router();
+const pool    = require('../../config/database');
 const { success, error, paginate } = require('../../utils/response.utils');
 const wsManager = require('../ws/ws.manager');
 
-/**
- * GET /public/menu/:branch_id
- */
+// Ruxsat etilgan mahsulot turlari (public endpointda ham ENUM tekshiruvi)
+const VALID_PRODUCT_TYPES = [
+  'food','drink','dessert','bread','somsa',
+  'grill','turkish','bar','icecream','tea','other'
+];
+
+// ─── GET /public/menu/:branch_id ──────────────────────────────
 router.get('/menu/:branch_id', async (req, res) => {
   const { branch_id } = req.params;
-  const { type, page = 1, limit = 50 } = req.query;
+  const { type } = req.query;
+
+  // Pagination DoS himoyasi
+  const page   = Math.max(1, parseInt(req.query.page)  || 1);
+  const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
   const offset = (page - 1) * limit;
+
+  // ENUM tekshiruvi
+  if (type && !VALID_PRODUCT_TYPES.includes(type)) {
+    return error(res, "Noto'g'ri mahsulot turi");
+  }
 
   try {
     let where = `WHERE p.branch_id = $1 AND p.is_available = TRUE`;
@@ -28,7 +41,7 @@ router.get('/menu/:branch_id', async (req, res) => {
       `SELECT p.id, p.name, p.price, p.type, p.image_url
        FROM products p ${where}
        ORDER BY p.type, p.name
-       LIMIT $${idx} OFFSET $${idx+1}`,
+       LIMIT $${idx} OFFSET $${idx + 1}`,
       [...params, limit, offset]
     );
 
@@ -44,9 +57,7 @@ router.get('/menu/:branch_id', async (req, res) => {
   }
 });
 
-/**
- * GET /public/waiters/:branch_id
- */
+// ─── GET /public/waiters/:branch_id ──────────────────────────
 router.get('/waiters/:branch_id', async (req, res) => {
   const { branch_id } = req.params;
   try {
@@ -56,48 +67,75 @@ router.get('/waiters/:branch_id', async (req, res) => {
        ORDER BY full_name`,
       [branch_id]
     );
-    return success(res, result.rows, 'Ofitsiantlar ro\'yxati');
+    return success(res, result.rows, "Ofitsiantlar ro'yxati");
   } catch (err) {
     return error(res, 'Server xatosi', 500);
   }
 });
 
-/**
- * POST /public/orders
- * QR orqali mijoz buyurtma beradi — darhol 'preparing' statusida yaratiladi
- * va oshxona xodimlariga WS xabar yuboriladi (ofitsiant kutmasdan)
- */
+// ─── POST /public/orders (QR buyurtma) ───────────────────────
 router.post('/orders', async (req, res) => {
   const { branch_id, table_id, waiter_id, items, guest_count } = req.body;
 
-  if (!branch_id || !table_id || !waiter_id || !items || !items.length) {
+  if (!branch_id || !table_id || !waiter_id || !Array.isArray(items) || items.length === 0) {
     return error(res, 'branch_id, table_id, waiter_id va mahsulotlar talab qilinadi');
   }
 
+  // ─── Input validatsiyasi ───────────────────────────────────
+  if (items.length > 50) return error(res, "Bir buyurtmada max 50 ta mahsulot bo'lishi mumkin");
+
+  for (const item of items) {
+    const qty = parseInt(item.quantity);
+    if (!Number.isInteger(qty) || qty < 1 || qty > 999) {
+      return error(res, "Har bir mahsulot miqdori 1 dan 999 gacha bo'lishi kerak");
+    }
+  }
+
+  const guestCnt = parseInt(guest_count) || 1;
+  if (guestCnt < 1 || guestCnt > 100) {
+    return error(res, "Mehmonlar soni 1-100 orasida bo'lishi kerak");
+  }
+
   const { v4: uuidv4 } = require('uuid');
-  const { ROLE_PRODUCT_MAP } = require('../../utils/roles.utils');
+  const client = await pool.connect();
 
   try {
-    // Waiter tekshirish
-    const waiterCheck = await pool.query(
-      `SELECT id FROM users WHERE id = $1 AND branch_id = $2 AND role = 'waiter' AND is_active = TRUE`,
+    await client.query('BEGIN');
+
+    // ─── Waiter tekshirish ─────────────────────────────────
+    const waiterCheck = await client.query(
+      `SELECT id FROM users
+       WHERE id = $1 AND branch_id = $2 AND role = 'waiter' AND is_active = TRUE`,
       [waiter_id, branch_id]
     );
-    if (waiterCheck.rows.length === 0) return error(res, 'Ofitsiant topilmadi', 404);
+    if (waiterCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return error(res, 'Ofitsiant topilmadi', 404);
+    }
 
-    // Stol tekshirish
-    const tableCheck = await pool.query(
-      `SELECT id, restaurant_id FROM tables WHERE id = $1 AND branch_id = $2`,
+    // ─── Stol tekshirish + RACE CONDITION himoya (FOR UPDATE) ─
+    const tableCheck = await client.query(
+      `SELECT id, restaurant_id, is_occupied
+       FROM tables WHERE id = $1 AND branch_id = $2
+       FOR UPDATE`,
       [table_id, branch_id]
     );
-    if (tableCheck.rows.length === 0) return error(res, 'Stol topilmadi', 404);
+    if (tableCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return error(res, 'Stol topilmadi', 404);
+    }
+    if (tableCheck.rows[0].is_occupied) {
+      await client.query('ROLLBACK');
+      return error(res, 'Stol hozir band. Iltimos, ofitsiantga murojaat qiling.');
+    }
+
     const restaurantId = tableCheck.rows[0].restaurant_id;
 
-    // Mahsulotlarni boyitish
+    // ─── Mahsulotlarni tekshirish ──────────────────────────
     const productIds = items.map(i => i.product_id);
-    const productsResult = await pool.query(
+    const productsResult = await client.query(
       `SELECT id, name, price, type, is_available FROM products
-       WHERE id = ANY($1) AND branch_id = $2 AND is_available = TRUE`,
+       WHERE id = ANY($1) AND branch_id = $2`,
       [productIds, branch_id]
     );
     const productsMap = {};
@@ -106,75 +144,85 @@ router.post('/orders', async (req, res) => {
     const enrichedItems = [];
     for (const item of items) {
       const product = productsMap[item.product_id];
-      if (!product) return error(res, `Mahsulot mavjud emas: ${item.product_id}`);
+      if (!product) {
+        await client.query('ROLLBACK');
+        return error(res, `Mahsulot topilmadi: ${item.product_id}`);
+      }
+      if (!product.is_available) {
+        await client.query('ROLLBACK');
+        return error(res, `Mahsulot mavjud emas: ${product.name}`);
+      }
       enrichedItems.push({
-        item_id: uuidv4(),
-        product_id: product.id,
-        name: product.name,
-        price: product.price,
-        type: product.type,
-        quantity: item.quantity || 1,
-        is_prepared: false
+        item_id:     uuidv4(),
+        product_id:  product.id,
+        name:        product.name,
+        price:       parseFloat(product.price),
+        type:        product.type,
+        quantity:    parseInt(item.quantity) || 1,
+        is_prepared: false,
       });
     }
 
     const orderId = uuidv4();
 
-    // ✅ 'preparing' — ofitsiant tasdiqlashini kutmasdan darhol oshxonaga
-    await pool.query(
-      `INSERT INTO orders (id, restaurant_id, branch_id, table_id, waiter_id, guest_count, items, is_from_qr, status)
+    await client.query(
+      `INSERT INTO orders
+         (id, restaurant_id, branch_id, table_id, waiter_id, guest_count, items, is_from_qr, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,'preparing')`,
-      [orderId, restaurantId, branch_id, table_id, waiter_id, guest_count || 1, JSON.stringify(enrichedItems)]
+      [orderId, restaurantId, branch_id, table_id,
+       waiter_id, guestCnt, JSON.stringify(enrichedItems)]
     );
 
-    // Stol band qilish
-    await pool.query(
-      `UPDATE tables SET is_occupied = TRUE, current_order_id = $1, updated_at = NOW() WHERE id = $2`,
+    await client.query(
+      `UPDATE tables SET is_occupied = TRUE, current_order_id = $1, updated_at = NOW()
+       WHERE id = $2`,
       [orderId, table_id]
     );
 
-    // Filial barcha hodimlarini olish (WS xabar uchun)
-    const branchUsers = await pool.query(
-      `SELECT id, role, extra_permissions FROM users WHERE branch_id = $1 AND is_active = TRUE`,
+    await client.query('COMMIT');
+
+    // ─── WS xabarlari ─────────────────────────────────────
+    const branchUsersResult = await pool.query(
+      `SELECT id, role, extra_permissions FROM users
+       WHERE branch_id = $1 AND is_active = TRUE`,
       [branch_id]
     );
-    const users = branchUsers.rows;
+    const branchUsers = branchUsersResult.rows;
+    const itemTypes   = [...new Set(enrichedItems.map(i => i.type))];
 
-    // 1) Ofitsiantga xabar — mijoz buyurtma berdi
     wsManager.sendToUser(waiter_id, 'qr_order', {
-      message: 'Mijoz QR orqali buyurtma berdi!',
-      order_id: orderId,
+      message:     'Mijoz QR orqali buyurtma berdi!',
+      order_id:    orderId,
       table_id,
-      items_count: enrichedItems.length
+      items_count: enrichedItems.length,
     });
 
-    // 2) Oshxona xodimlariga xabar — har biri o'z turi bo'yicha
-    // item turlarini ajratib olish
-    const itemTypes = [...new Set(enrichedItems.map(i => i.type))];
-
-    wsManager.sendToPreparers(users, itemTypes, 'new_order', {
-      message: `QR buyurtma: ${enrichedItems.length} ta mahsulot`,
-      order_id: orderId,
+    wsManager.sendToPreparers(branchUsers, itemTypes, 'new_order', {
+      message:     `QR buyurtma: ${enrichedItems.length} ta mahsulot`,
+      order_id:    orderId,
       table_id,
-      items: enrichedItems,
-      items_count: enrichedItems.length
+      items:       enrichedItems,
+      items_count: enrichedItems.length,
     });
 
-    // 3) Menejerga ham xabar
-    wsManager.sendToBranchRole(users, ['manager'], 'new_order', {
-      message: `QR buyurtma keldi`,
-      order_id: orderId,
+    wsManager.sendToBranchRole(branchUsers, ['manager'], 'new_order', {
+      message:     'QR buyurtma keldi',
+      order_id:    orderId,
       table_id,
-      items_count: enrichedItems.length
+      items_count: enrichedItems.length,
     });
 
     return res.status(201).json({
       success: true,
       message: 'Buyurtmangiz qabul qilindi! Tayyorlanmoqda...',
-      data: { order_id: orderId }
+      data:    { order_id: orderId },
     });
+
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     return error(res, 'Server xatosi', 500);
+  } finally {
+    client.release();
   }
 });
 
