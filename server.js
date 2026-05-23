@@ -1,16 +1,17 @@
 require('dotenv').config();
 const http = require('http');
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
-const app = require('./src/app');
-const pool = require('./src/config/database');
-const { startCronJobs } = require('./src/utils/cron.utils');
-const { initWebSocket } = require('./src/modules/ws/ws.manager');
-const { handleUpgrade } = require('./src/modules/ws/ws.routes');
 
-const PORT = process.env.PORT || 3000;
+const app        = require('./src/app');
+const pool       = require('./src/config/database');
+const { startCronJobs }  = require('./src/utils/cron.utils');
+const { initWebSocket }  = require('./src/modules/ws/ws.manager');
+const { handleUpgrade }  = require('./src/modules/ws/ws.routes');
+
+const PORT = parseInt(process.env.PORT) || 3000;
 
 const initDB = async () => {
   try {
@@ -20,7 +21,7 @@ const initDB = async () => {
       await pool.query(schema);
     }
 
-    // MIGRATION: users.role ENUM -> TEXT
+    // Migratsiyalar
     try {
       const r = await pool.query(`SELECT udt_name FROM information_schema.columns WHERE table_name='users' AND column_name='role'`);
       if (r.rows[0]?.udt_name === 'user_role') {
@@ -28,7 +29,6 @@ const initDB = async () => {
       }
     } catch (_) {}
 
-    // MIGRATION: products.type ENUM -> TEXT
     try {
       const r = await pool.query(`SELECT udt_name FROM information_schema.columns WHERE table_name='products' AND column_name='type'`);
       if (r.rows[0]?.udt_name === 'product_type') {
@@ -36,7 +36,6 @@ const initDB = async () => {
       }
     } catch (_) {}
 
-    // MIGRATION: extra_permissions -> TEXT[]
     try {
       const r = await pool.query(`SELECT udt_name FROM information_schema.columns WHERE table_name='users' AND column_name='extra_permissions'`);
       if (r.rows[0]?.udt_name === 'product_type') {
@@ -44,14 +43,12 @@ const initDB = async () => {
       }
     } catch (_) {}
 
-    // order_archive: xizmat haqi ustunlari qo'shish
     try {
       await pool.query(`ALTER TABLE order_archive ADD COLUMN IF NOT EXISTS service_fee_percent DECIMAL(5,2) DEFAULT 0`);
       await pool.query(`ALTER TABLE order_archive ADD COLUMN IF NOT EXISTS service_fee_amount DECIMAL(12,2) DEFAULT 0`);
       await pool.query(`ALTER TABLE order_archive ADD COLUMN IF NOT EXISTS grand_total DECIMAL(12,2) DEFAULT 0`);
     } catch (_) {}
 
-    // order_archive: payment_type ENUM -> TEXT (agar kerak bo'lsa)
     try {
       const r = await pool.query(`SELECT udt_name FROM information_schema.columns WHERE table_name='order_archive' AND column_name='payment_type'`);
       if (r.rows[0]?.udt_name === 'payment_type') {
@@ -59,7 +56,6 @@ const initDB = async () => {
       }
     } catch (_) {}
 
-    // Yangi jadvallar
     await pool.query(`CREATE TABLE IF NOT EXISTS custom_roles (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
@@ -78,7 +74,6 @@ const initDB = async () => {
       UNIQUE (branch_id, key)
     )`);
 
-    // Filial sozlamalari (xizmat haqi %, ofitsiant komissiya %)
     await pool.query(`CREATE TABLE IF NOT EXISTS branch_settings (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE UNIQUE,
@@ -88,7 +83,6 @@ const initDB = async () => {
       updated_at TIMESTAMP DEFAULT NOW()
     )`);
 
-    // Ofitsiant kunlik maoshi
     await pool.query(`CREATE TABLE IF NOT EXISTS waiter_earnings (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       waiter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -103,9 +97,20 @@ const initDB = async () => {
       UNIQUE (waiter_id, date)
     )`);
 
-    // Super admin
+    // ─── SUPER ADMIN: default parol bo'lsa xato chiqar ────────
     const username = process.env.SUPER_ADMIN_USERNAME || 'superadmin';
-    const password = process.env.SUPER_ADMIN_PASSWORD || 'Admin@12345';
+    const password = process.env.SUPER_ADMIN_PASSWORD;
+
+    if (!password) {
+      // Production da majburiy
+      if (process.env.NODE_ENV === 'production') {
+        console.error('[KRITIK] SUPER_ADMIN_PASSWORD env o\'zgaruvchisi o\'rnatilmagan! Server to\'xtatilmoqda.');
+        process.exit(1);
+      }
+      console.warn('[OGOHLANTIRISH] SUPER_ADMIN_PASSWORD o\'rnatilmagan. Development da vaqtinchalik parol ishlatilmoqda.');
+    }
+
+    const finalPassword = password || `Dev_${uuidv4().slice(0, 8)}`;
 
     if (process.env.RESET_SUPER_ADMIN === 'true') {
       await pool.query(`DELETE FROM users WHERE role = 'super_admin'`);
@@ -113,14 +118,18 @@ const initDB = async () => {
 
     const adminCheck = await pool.query(`SELECT id FROM users WHERE role = 'super_admin' LIMIT 1`);
     if (adminCheck.rows.length === 0) {
-      const hash = await bcrypt.hash(password, 12);
+      const hash = await bcrypt.hash(finalPassword, 12);
       await pool.query(
         `INSERT INTO users (id, full_name, username, password_hash, role) VALUES ($1,'Super Admin',$2,$3,'super_admin')`,
         [uuidv4(), username, hash]
       );
+      if (!password) {
+        console.log(`[DEV] Vaqtinchalik super admin paroli: ${finalPassword}`);
+      }
     }
 
   } catch (err) {
+    console.error('[initDB] DB initsializatsiya xatosi:', err.message);
     process.exit(1);
   }
 };
@@ -130,6 +139,10 @@ initDB().then(() => {
   initWebSocket();
   httpServer.on('upgrade', handleUpgrade);
   httpServer.listen(PORT, () => {
+    console.log(`[Server] Port ${PORT} da ishlamoqda`);
     startCronJobs();
   });
+}).catch((err) => {
+  console.error('[Server] Ishga tushishda xato:', err.message);
+  process.exit(1);
 });
