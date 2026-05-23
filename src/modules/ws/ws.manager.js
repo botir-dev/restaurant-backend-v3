@@ -1,6 +1,6 @@
 const { WebSocketServer, WebSocket } = require('ws');
 
-const clients = new Map();
+const clients   = new Map(); // userId → { ws, userId, expiresAt }
 let wss = null;
 
 const initWebSocket = () => {
@@ -17,7 +17,7 @@ const initWebSocket = () => {
     });
 
     ws.on('close', () => {
-      if (ws._userId && clients.get(ws._userId) === ws) {
+      if (ws._userId && clients.get(ws._userId)?.ws === ws) {
         clients.delete(ws._userId);
       }
     });
@@ -25,29 +25,60 @@ const initWebSocket = () => {
     ws.on('error', () => {});
   });
 
+  // ─── Har 5 daqiqada muddati o'tgan sessiyalarni tozalash ──
+  setInterval(() => {
+    const now = Date.now();
+    for (const [userId, entry] of clients.entries()) {
+      if (entry.expiresAt && entry.expiresAt < now) {
+        try { entry.ws.terminate(); } catch (_) {}
+        clients.delete(userId);
+      }
+    }
+  }, 5 * 60 * 1000);
+
   return wss;
 };
 
 const getWss = () => wss;
 
-const addClient = (userId, ws) => {
+// expiresAt — JWT tokenning muddati (token da exp field)
+const addClient = (userId, ws, tokenExp) => {
   const existing = clients.get(userId);
-  if (existing && existing !== ws) {
-    try { existing.terminate(); } catch (_) {}
+  if (existing && existing.ws !== ws) {
+    try { existing.ws.terminate(); } catch (_) {}
   }
   ws._userId = userId;
-  clients.set(userId, ws);
+  clients.set(userId, {
+    ws,
+    userId,
+    expiresAt: tokenExp ? tokenExp * 1000 : null, // JWT exp sekundda keladi
+  });
 };
 
 const removeClient = (userId) => {
   clients.delete(userId);
 };
 
+// ─── Logout bo'lganda WS ni ham yopish ────────────────────────
+const disconnectUser = (userId) => {
+  const entry = clients.get(userId);
+  if (entry) {
+    try { entry.ws.terminate(); } catch (_) {}
+    clients.delete(userId);
+  }
+};
+
 const sendToUser = (userId, event, data) => {
-  const ws = clients.get(userId);
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  const entry = clients.get(userId);
+  if (entry?.ws && entry.ws.readyState === WebSocket.OPEN) {
+    // Muddati o'tganmi?
+    if (entry.expiresAt && entry.expiresAt < Date.now()) {
+      try { entry.ws.terminate(); } catch (_) {}
+      clients.delete(userId);
+      return;
+    }
     try {
-      ws.send(JSON.stringify({ type: event, data }));
+      entry.ws.send(JSON.stringify({ type: event, data }));
     } catch (_) {
       removeClient(userId);
     }
@@ -74,6 +105,6 @@ const sendToPreparers = (branchUsers, itemTypes, event, data) => {
 const getClientCount = () => clients.size;
 
 module.exports = {
-  initWebSocket, getWss, addClient, removeClient,
+  initWebSocket, getWss, addClient, removeClient, disconnectUser,
   sendToUser, sendToBranchRole, sendToPreparers, getClientCount,
 };
