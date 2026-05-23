@@ -39,7 +39,7 @@ app.use(helmet({
 // ─── CORS: faqat ruxsat etilgan domenlar ──────────────────────
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:3001', 'http://localhost:3000'];
+  : ['http://localhost:3001', 'http://localhost:3000', 'https://restaurant.botirdev.uz'];
 
 app.use(cors({
   origin: (origin, callback) => {
