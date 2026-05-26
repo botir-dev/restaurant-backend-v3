@@ -95,9 +95,11 @@ const createOrder = async (req, res) => {
       await client.query('ROLLBACK');
       return error(res, 'Stol topilmadi', 404);
     }
-    if (tableResult.rows[0].is_occupied) {
+    // Stol band bo'lsa ham buyurtma qo'shish mumkin —
+    // lekin faol buyurtmasi (current_order_id) bo'lsa bloklash
+    if (tableResult.rows[0].is_occupied && tableResult.rows[0].current_order_id) {
       await client.query('ROLLBACK');
-      return error(res, 'Stol allaqachon band');
+      return error(res, 'Stolda allaqachon faol buyurtma mavjud');
     }
 
     const productIds = items.map(i => i.product_id);
