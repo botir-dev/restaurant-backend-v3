@@ -309,6 +309,7 @@ const prepareItem = async (req, res) => {
 
     const order = orderResult.rows[0];
     const allowedTypes = await getAllowedTypes(role, extra_permissions, req.branchId);
+    const isManager = role === 'manager' || role === 'super_admin';
 
     let itemIndex = order.items.findIndex(i => i.item_id === itemId);
     if (itemIndex === -1) {
@@ -317,7 +318,9 @@ const prepareItem = async (req, res) => {
     if (itemIndex === -1) return error(res, 'Item topilmadi yoki allaqachon tayyor', 404);
 
     const item = order.items[itemIndex];
-    if (!allowedTypes.includes(item.type)) {
+
+    // Manager barcha itemlarni tayyorlay oladi, boshqalar faqat o'z turlarini
+    if (!isManager && !allowedTypes.includes(item.type)) {
       return error(res, 'Siz bu itemni tayyorlay olmaysiz', 403);
     }
 
