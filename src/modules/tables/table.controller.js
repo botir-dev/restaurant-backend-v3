@@ -6,8 +6,8 @@ const getTables = async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT t.*,
-        (SELECT json_build_object('id', r.id, 'full_name', u.full_name, 'reserved_at', r.reserved_at, 'duration_min', r.duration_min)
-         FROM reservations r JOIN users u ON u.id = r.created_by
+        (SELECT json_build_object('id', r.id, 'full_name', r.full_name, 'phone', r.phone, 'reserved_at', r.reserved_at, 'duration_min', r.duration_min)
+         FROM reservations r
          WHERE r.table_id = t.id AND r.status = 'active'
          ORDER BY r.reserved_at ASC LIMIT 1) as next_reservation
        FROM tables t
