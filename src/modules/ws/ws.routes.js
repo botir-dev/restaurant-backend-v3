@@ -28,12 +28,18 @@ const handleUpgrade = (request, socket, head) => {
     return;
   }
 
-  // Token faqat Authorization headerdan olinadi (xavfsiz usul)
-  // URL query parametrdan token qabul QILINMAYDI — loglarda ko'rinib qoladi
+  // Token 1) Authorization header, 2) Sec-WebSocket-Protocol subprotocol dan olinadi
   let token = null;
   const authHeader = request.headers['authorization'] || request.headers['Authorization'];
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.split(' ')[1];
+  }
+
+  // Subprotocol orqali: "bearer.TOKEN_VALUE"
+  if (!token) {
+    const proto = request.headers['sec-websocket-protocol'] || '';
+    const match = proto.match(/(?:^|,\s*)bearer\.(\S+)/);
+    if (match) token = match[1];
   }
 
   if (!token) {
