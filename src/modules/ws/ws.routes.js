@@ -30,6 +30,7 @@ const handleUpgrade = (request, socket, head) => {
 
   // Token faqat Authorization headerdan olinadi (xavfsiz usul)
   // URL query parametrdan token qabul QILINMAYDI — loglarda ko'rinib qoladi
+  let token = null;
   const authHeader = request.headers['authorization'] || request.headers['Authorization'];
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.split(' ')[1];
