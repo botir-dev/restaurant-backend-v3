@@ -37,9 +37,15 @@ app.use(helmet({
 }));
 
 // ─── CORS: faqat ruxsat etilgan domenlar ──────────────────────
+// Production da ALLOWED_ORIGINS env majburiy
+if (!process.env.ALLOWED_ORIGINS && process.env.NODE_ENV === 'production') {
+  console.error('[KRITIK] ALLOWED_ORIGINS env o\'rnatilmagan! Server to\'xtatilmoqda.');
+  process.exit(1);
+}
+
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:3001', 'http://localhost:3000', 'https://restaurant.botirdev.uz'];
+  : ['http://localhost:3001', 'http://localhost:3000'];
 
 app.use(cors({
   origin: (origin, callback) => {
