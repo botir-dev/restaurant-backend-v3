@@ -28,23 +28,11 @@ const handleUpgrade = (request, socket, head) => {
     return;
   }
 
-  // ─── Token: URL query EMAS — Authorization header dan olinadi ──
-  // WS ulanishda: new WebSocket(url, [], { headers: { Authorization: 'Bearer ...' } })
-  // Eski URL query usuli olib tashlandi — loglarda token ko'rinmasin
-  let token = null;
-
-  // 1) Header dan (xavfsiz usul)
+  // Token faqat Authorization headerdan olinadi (xavfsiz usul)
+  // URL query parametrdan token qabul QILINMAYDI — loglarda ko'rinib qoladi
   const authHeader = request.headers['authorization'] || request.headers['Authorization'];
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.split(' ')[1];
-  }
-
-  // 2) Fallback: hali URL dan ham qabul qilamiz (deprecated, kelajakda olib tashlanadi)
-  // Bu yerda token log ga tushmasin deb morgan safe-url regex qoplanadi
-  if (!token) {
-    try {
-      token = new URL(request.url, `http://${request.headers.host}`).searchParams.get('token');
-    } catch (_) {}
   }
 
   if (!token) {
