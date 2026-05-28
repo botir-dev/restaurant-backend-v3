@@ -45,18 +45,23 @@ const occupyTable = async (req, res) => {
   const { guest_count } = req.body;
 
   try {
-    const tableResult = await pool.query(
-      `SELECT * FROM tables WHERE id = $1 AND branch_id = $2`,
-      [id, req.branchId]
-    );
-    if (tableResult.rows.length === 0) return error(res, 'Stol topilmadi', 404);
-    if (tableResult.rows[0].is_occupied) return error(res, 'Stol allaqachon band');
-
+    // Atomic UPDATE — SELECT + UPDATE emas, bir so'rovda
+    // is_occupied = FALSE bo'lsagina yangilanadi (race condition yo'q)
     const result = await pool.query(
       `UPDATE tables SET is_occupied = TRUE, updated_at = NOW()
-       WHERE id = $1 AND branch_id = $2 RETURNING *`,
+       WHERE id = $1 AND branch_id = $2 AND is_occupied = FALSE
+       RETURNING *`,
       [id, req.branchId]
     );
+    if (result.rows.length === 0) {
+      // Stol topilmadimi yoki allaqachon bandmi — aniq tekshiramiz
+      const check = await pool.query(
+        `SELECT is_occupied FROM tables WHERE id = $1 AND branch_id = $2`,
+        [id, req.branchId]
+      );
+      if (check.rows.length === 0) return error(res, 'Stol topilmadi', 404);
+      return error(res, 'Stol allaqachon band');
+    }
     return success(res, { table: result.rows[0], guest_count }, 'Stol band qilindi');
   } catch (err) {
     return error(res, 'Server xatosi', 500);
