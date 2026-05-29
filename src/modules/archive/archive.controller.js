@@ -112,11 +112,12 @@ const getRevenue = async (req, res) => {
     const result = await pool.query(
       `SELECT
          COUNT(*)  as total_orders,
-         SUM(total_amount) as total_revenue,
-         AVG(total_amount) as avg_order,
-         SUM(CASE WHEN payment_type = 'cash'       THEN total_amount ELSE 0 END) as cash_revenue,
-         SUM(CASE WHEN payment_type = 'card'       THEN total_amount ELSE 0 END) as card_revenue,
-         SUM(CASE WHEN payment_type = 'qr_payment' THEN total_amount ELSE 0 END) as qr_revenue
+         SUM(grand_total) as total_revenue,
+         AVG(grand_total) as avg_order,
+         SUM(service_fee_amount) as total_service_fee,
+         SUM(CASE WHEN payment_type = 'cash'       THEN grand_total ELSE 0 END) as cash_revenue,
+         SUM(CASE WHEN payment_type = 'card'       THEN grand_total ELSE 0 END) as card_revenue,
+         SUM(CASE WHEN payment_type = 'qr_payment' THEN grand_total ELSE 0 END) as qr_revenue
        FROM order_archive ${where}`,
       params
     );
