@@ -80,6 +80,9 @@ const updateSettings = async (req, res) => {
  */
 const getWaiterEarnings = async (req, res) => {
   const { date } = req.query;
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return error(res, "Sana YYYY-MM-DD formatida bo\'lishi kerak (masalan: 2026-05-29)");
+  }
   const targetDate = date || new Date().toISOString().split('T')[0];
 
   try {
