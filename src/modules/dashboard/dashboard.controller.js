@@ -20,7 +20,7 @@ const getDashboard = async (req, res) => {
 
       // Eng band stollar (oylik)
       pool.query(`
-        SELECT table_number, COUNT(*) as order_count, SUM(total_amount) as revenue
+        SELECT table_number, COUNT(*) as order_count, SUM(grand_total) as revenue
         FROM order_archive
         WHERE branch_id = $1 AND created_at >= date_trunc('month', NOW())
         GROUP BY table_number
@@ -29,7 +29,7 @@ const getDashboard = async (req, res) => {
 
       // Eng faol ofitsiantlar
       pool.query(`
-        SELECT waiter_name, COUNT(*) as orders_served, SUM(total_amount) as total_revenue
+        SELECT waiter_name, COUNT(*) as orders_served, SUM(grand_total) as total_revenue
         FROM order_archive
         WHERE branch_id = $1 AND created_at >= date_trunc('month', NOW())
         GROUP BY waiter_id, waiter_name
@@ -38,7 +38,7 @@ const getDashboard = async (req, res) => {
 
       // Kunlik daromad (oxirgi 30 kun)
       pool.query(`
-        SELECT DATE(created_at) as date, SUM(total_amount) as revenue, COUNT(*) as orders
+        SELECT DATE(created_at) as date, SUM(grand_total) as revenue, COUNT(*) as orders
         FROM order_archive
         WHERE branch_id = $1 AND created_at >= NOW() - INTERVAL '30 days'
         GROUP BY DATE(created_at)
