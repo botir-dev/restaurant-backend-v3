@@ -29,6 +29,12 @@ const createStaff = async (req, res) => {
   if (!full_name || !username || !password || !role) {
     return error(res, 'Ism, username, parol va rol talab qilinadi');
   }
+  if (password.length < 6) {
+    return error(res, "Parol kamida 6 ta belgidan iborat bo\'lishi kerak");
+  }
+  if (password.length > 128) {
+    return error(res, 'Parol juda uzun');
+  }
 
   try {
     // Standart rol emas bo'lsa — custom_roles jadvalidan tekshirish
@@ -80,7 +86,11 @@ const updateStaff = async (req, res) => {
     }
 
     let passwordHash = undefined;
-    if (password) passwordHash = await bcrypt.hash(password, 12);
+    if (password) {
+      if (password.length < 6) return error(res, "Parol kamida 6 ta belgidan iborat bo\'lishi kerak");
+      if (password.length > 128) return error(res, 'Parol juda uzun');
+      passwordHash = await bcrypt.hash(password, 12);
+    }
 
     const result = await pool.query(
       `UPDATE users SET
