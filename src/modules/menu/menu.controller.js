@@ -43,7 +43,9 @@ const getMenuItems = async (req, res) => {
                  'inventory_name', inv.name,
                  'inventory_unit', inv.unit,
                  'inventory_custom_unit', inv.custom_unit,
-                 'quantity', r.quantity
+                 'quantity', r.quantity,
+                 'cost_price', inv.cost_price,
+                 'total_cost', ROUND(r.quantity * COALESCE(inv.cost_price, 0), 2)
                ) ORDER BY inv.name
              ) FILTER (WHERE r.id IS NOT NULL), '[]'
            ) AS recipe
