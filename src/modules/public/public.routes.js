@@ -26,21 +26,21 @@ router.get('/menu/:branch_id', async (req, res) => {
   }
 
   try {
-    let where = `WHERE p.branch_id = $1 AND p.is_available = TRUE`;
+    let where = `WHERE mi.branch_id = $1 AND mi.is_available = TRUE`;
     const params = [branch_id];
     let idx = 2;
 
-    if (type) { where += ` AND p.type = $${idx++}`; params.push(type); }
+    if (type) { where += ` AND mi.type = $${idx++}`; params.push(type); }
 
     const countResult = await pool.query(
-      `SELECT COUNT(*) FROM products p ${where}`, params
+      `SELECT COUNT(*) FROM menu_items mi ${where}`, params
     );
     const total = parseInt(countResult.rows[0].count);
 
     const result = await pool.query(
-      `SELECT p.id, p.name, p.price, p.type, p.image_url
-       FROM products p ${where}
-       ORDER BY p.type, p.name
+      `SELECT mi.id, mi.name, mi.price, mi.type, mi.image_url
+       FROM menu_items mi ${where}
+       ORDER BY mi.type, mi.name
        LIMIT $${idx} OFFSET $${idx + 1}`,
       [...params, limit, offset]
     );
@@ -134,7 +134,7 @@ router.post('/orders', async (req, res) => {
     // ─── Mahsulotlarni tekshirish ──────────────────────────
     const productIds = items.map(i => i.product_id);
     const productsResult = await client.query(
-      `SELECT id, name, price, type, is_available FROM products
+      `SELECT id, name, price, type, is_available FROM menu_items
        WHERE id = ANY($1) AND branch_id = $2`,
       [productIds, branch_id]
     );
