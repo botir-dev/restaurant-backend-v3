@@ -18,6 +18,8 @@ const dashboardRoutes = require('./modules/dashboard/dashboard.routes');
 const wsRoutes        = require('./modules/ws/ws.routes');
 const publicRoutes    = require('./modules/public/public.routes');
 const managerRoutes   = require('./modules/manager/manager.routes');
+const inventoryRoutes = require('./modules/inventory/inventory.routes');
+const menuRoutes      = require('./modules/menu/menu.routes');
 // migration.routes — PRODUCTION DA O'CHIRILDI (xavfsizlik)
 
 const app = express();
@@ -115,6 +117,8 @@ app.use('/payments',    paymentRoutes);
 app.use('/archive',     archiveRoutes);
 app.use('/dashboard',   dashboardRoutes);
 app.use('/manager',     managerRoutes);
+app.use('/inventory',   inventoryRoutes);
+app.use('/menu',        menuRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────
 app.use((req, res) => {
