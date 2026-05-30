@@ -179,6 +179,45 @@ router.post('/orders', async (req, res) => {
       [orderId, table_id]
     );
 
+    // ─── OMBORDAN AVTOMATIK AYIRISH (retsept bo'yicha) ────────
+    for (const eItem of enrichedItems) {
+      const recipeRes = await client.query(
+        `SELECT r.inventory_item_id, r.quantity as recipe_qty,
+                inv.quantity as stock_qty
+         FROM menu_item_recipes r
+         JOIN inventory_items inv ON inv.id = r.inventory_item_id
+         WHERE r.menu_item_id = $1 AND inv.branch_id = $2`,
+        [eItem.product_id, branch_id]
+      );
+
+      if (recipeRes.rows.length === 0) continue; // retsept yo'q — o'tkazib yuborish
+
+      for (const rLine of recipeRes.rows) {
+        const needed      = parseFloat(rLine.recipe_qty) * eItem.quantity;
+        const currentStock= parseFloat(rLine.stock_qty);
+        const afterStock  = currentStock - needed;
+
+        await client.query(
+          `UPDATE inventory_items
+           SET quantity = GREATEST(0, quantity - $1), updated_at = NOW()
+           WHERE id = $2 AND branch_id = $3`,
+          [needed, rLine.inventory_item_id, branch_id]
+        );
+
+        await client.query(
+          `INSERT INTO inventory_logs
+             (id, branch_id, inventory_item_id, change_amount, reason, order_id, before_quantity, after_quantity)
+           VALUES ($1,$2,$3,$4,'order',$5,$6,$7)`,
+          [
+            uuidv4(), branch_id, rLine.inventory_item_id,
+            -needed, orderId,
+            currentStock, Math.max(0, afterStock)
+          ]
+        );
+      }
+    }
+    // ─────────────────────────────────────────────────────────
+
     await client.query('COMMIT');
 
     // ─── WS xabarlari ─────────────────────────────────────
