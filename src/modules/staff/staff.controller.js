@@ -18,10 +18,13 @@ const validatePassword = (password) => {
 const getStaff = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, full_name, username, phone, role, extra_permissions, is_active, created_at
+      `SELECT id, full_name, username, phone, role, extra_permissions, is_active, monthly_salary, created_at
        FROM users
-       WHERE branch_id = $1 AND restaurant_id = $2 AND role != 'manager' AND is_active = TRUE
-       ORDER BY created_at DESC`,
+       WHERE branch_id = $1 AND restaurant_id = $2
+         AND role != 'waiter' AND role != 'super_admin' AND is_active = TRUE
+       ORDER BY
+         CASE WHEN role = 'manager' THEN 0 ELSE 1 END,
+         created_at DESC`,
       [req.branchId, req.restaurantId]
     );
     return success(res, result.rows);
@@ -72,9 +75,38 @@ const createStaff = async (req, res) => {
 // PUT /staff/:id
 const updateStaff = async (req, res) => {
   const { id } = req.params;
-  const { full_name, phone, password, role, extra_permissions } = req.body;
+  const { full_name, phone, password, role, extra_permissions, monthly_salary } = req.body;
 
   try {
+    // Manager o'zini yangilayapti yoki boshqa xodimni?
+    const targetUser = await pool.query(
+      `SELECT id, role FROM users WHERE id = $1 AND branch_id = $2`,
+      [id, req.branchId]
+    );
+    if (targetUser.rows.length === 0) return error(res, 'Hodim topilmadi', 404);
+
+    const isManager = targetUser.rows[0].role === 'manager';
+
+    // Manager o'zini yangilasa — faqat maosh va parol o'zgartirilsin
+    if (isManager) {
+      let passwordHash = undefined;
+      if (password) {
+        const passErr = validatePassword(password);
+        if (passErr) return error(res, passErr);
+        passwordHash = await bcrypt.hash(password, 12);
+      }
+      const result = await pool.query(
+        `UPDATE users SET
+          monthly_salary = COALESCE($1, monthly_salary),
+          password_hash = COALESCE($2, password_hash),
+          updated_at = NOW()
+         WHERE id = $3 AND branch_id = $4
+         RETURNING id, full_name, username, role, extra_permissions, monthly_salary`,
+        [monthly_salary !== undefined ? monthly_salary : null, passwordHash, id, req.branchId]
+      );
+      return success(res, result.rows[0], 'Yangilandi');
+    }
+
     // Rol o'zgartirilsa tekshirish
     if (role && !BASE_ROLES.includes(role)) {
       const customCheck = await pool.query(
@@ -93,6 +125,8 @@ const updateStaff = async (req, res) => {
       passwordHash = await bcrypt.hash(password, 12);
     }
 
+    const salary = monthly_salary !== undefined ? monthly_salary : null;
+
     const result = await pool.query(
       `UPDATE users SET
         full_name = COALESCE($1, full_name),
@@ -100,10 +134,11 @@ const updateStaff = async (req, res) => {
         password_hash = COALESCE($3, password_hash),
         role = COALESCE($4, role),
         extra_permissions = COALESCE($5, extra_permissions),
+        monthly_salary = COALESCE($6, monthly_salary),
         updated_at = NOW()
-       WHERE id = $6 AND branch_id = $7 AND role != 'manager'
-       RETURNING id, full_name, username, role, extra_permissions`,
-      [full_name, phone, passwordHash, role, extra_permissions, id, req.branchId]
+       WHERE id = $7 AND branch_id = $8
+       RETURNING id, full_name, username, role, extra_permissions, monthly_salary`,
+      [full_name, phone, passwordHash, role, extra_permissions, salary, id, req.branchId]
     );
     if (result.rows.length === 0) return error(res, 'Hodim topilmadi', 404);
     return success(res, result.rows[0], 'Hodim yangilandi');
