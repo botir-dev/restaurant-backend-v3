@@ -6,6 +6,14 @@ const { success, created, error } = require('../../utils/response.utils');
 const BASE_ROLES = ['waiter', 'cashier', 'storekeeper', 'cook', 'baker',
   'somsa_maker', 'grill_master', 'turkish_cook', 'bartender', 'icecream_maker', 'tea_master'];
 
+const validatePassword = (password) => {
+  if (password.length < 8) return "Parol kamida 8 ta belgidan iborat bo'lishi kerak";
+  if (password.length > 128) return 'Parol juda uzun';
+  if (!/[A-Z]/.test(password)) return "Parol kamida 1 ta katta harf bo'lishi kerak";
+  if (!/[0-9]/.test(password)) return "Parol kamida 1 ta raqam bo'lishi kerak";
+  return null;
+};
+
 // GET /staff
 const getStaff = async (req, res) => {
   try {
@@ -18,7 +26,6 @@ const getStaff = async (req, res) => {
     );
     return success(res, result.rows);
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -29,12 +36,9 @@ const createStaff = async (req, res) => {
   if (!full_name || !username || !password || !role) {
     return error(res, 'Ism, username, parol va rol talab qilinadi');
   }
-  if (password.length < 6) {
-    return error(res, "Parol kamida 6 ta belgidan iborat bo\'lishi kerak");
-  }
-  if (password.length > 128) {
-    return error(res, 'Parol juda uzun');
-  }
+
+  const passErr = validatePassword(password);
+  if (passErr) return error(res, passErr);
 
   try {
     // Standart rol emas bo'lsa — custom_roles jadvalidan tekshirish
@@ -44,14 +48,12 @@ const createStaff = async (req, res) => {
         [role, req.branchId]
       );
       if (customCheck.rows.length === 0) {
-        return error(res, 'Noto\'g\'ri rol. Avval bu rolni custom_roles ga qo\'shing');
+        return error(res, "Noto'g'ri rol. Avval bu rolni custom_roles ga qo'shing");
       }
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // role ni text sifatida saqlaymiz — ENUM cheklovini chetlab o'tish uchun
-    // Buning uchun users.role ni text ga migration qilish kerak (server.js da)
     const result = await pool.query(
       `INSERT INTO users (id, restaurant_id, branch_id, full_name, username, phone, password_hash, role, extra_permissions)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -62,8 +64,7 @@ const createStaff = async (req, res) => {
     return created(res, result.rows[0], 'Hodim yaratildi');
   } catch (err) {
     if (err.code === '23505') return error(res, 'Bu username allaqachon mavjud');
-    if (err.code === '22P02') return error(res, 'Bu rol ENUM da yo\'q. Migration kerak');
-    console.error(err);
+    if (err.code === '22P02') return error(res, "Bu rol ENUM da yo'q. Migration kerak");
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -81,14 +82,14 @@ const updateStaff = async (req, res) => {
         [role, req.branchId]
       );
       if (customCheck.rows.length === 0) {
-        return error(res, 'Noto\'g\'ri rol');
+        return error(res, "Noto'g'ri rol");
       }
     }
 
     let passwordHash = undefined;
     if (password) {
-      if (password.length < 6) return error(res, "Parol kamida 6 ta belgidan iborat bo\'lishi kerak");
-      if (password.length > 128) return error(res, 'Parol juda uzun');
+      const passErr = validatePassword(password);
+      if (passErr) return error(res, passErr);
       passwordHash = await bcrypt.hash(password, 12);
     }
 
@@ -108,7 +109,6 @@ const updateStaff = async (req, res) => {
     return success(res, result.rows[0], 'Hodim yangilandi');
   } catch (err) {
     if (err.code === '22P02') return error(res, 'Bu rol tizimda mavjud emas');
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -122,9 +122,8 @@ const deleteStaff = async (req, res) => {
        WHERE id = $1 AND branch_id = $2 AND role != 'manager'`,
       [id, req.branchId]
     );
-    return success(res, {}, 'Hodim o\'chirildi');
+    return success(res, {}, "Hodim o'chirildi");
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
