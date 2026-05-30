@@ -15,7 +15,6 @@ const getCustomRoles = async (req, res) => {
     );
     return success(res, result.rows);
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -39,7 +38,6 @@ const createCustomRole = async (req, res) => {
     return created(res, result.rows[0], 'Maxsus rol yaratildi');
   } catch (err) {
     if (err.code === '23505') return error(res, 'Bu key allaqachon mavjud');
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -54,7 +52,6 @@ const deleteCustomRole = async (req, res) => {
     );
     return success(res, {}, "O'chirildi");
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -72,7 +69,6 @@ const getCustomProductTypes = async (req, res) => {
     );
     return success(res, result.rows);
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -101,7 +97,6 @@ const createCustomProductType = async (req, res) => {
     return created(res, result.rows[0], 'Mahsulot turi yaratildi');
   } catch (err) {
     if (err.code === '23505') return error(res, 'Bu key allaqachon mavjud');
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
@@ -116,7 +111,6 @@ const deleteCustomProductType = async (req, res) => {
     );
     return success(res, {}, "O'chirildi");
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
