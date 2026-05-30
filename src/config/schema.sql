@@ -193,3 +193,76 @@ CREATE INDEX idx_orders_waiter    ON orders(waiter_id);
 CREATE INDEX idx_archive_branch   ON order_archive(branch_id);
 CREATE INDEX idx_archive_created  ON order_archive(created_at);
 CREATE INDEX idx_reservations_table ON reservations(table_id, reserved_at);
+
+-- ============================================================
+-- OMBORXONA (INVENTORY) - Xom ashyo va ingredientlar
+-- ============================================================
+CREATE TYPE inventory_unit AS ENUM ('kg', 'L', 'dona', 'g', 'ml', 'custom');
+
+CREATE TABLE inventory_items (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  branch_id     UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  name          VARCHAR(200) NOT NULL,
+  unit          inventory_unit NOT NULL DEFAULT 'kg',
+  custom_unit   VARCHAR(50),          -- unit='custom' bo'lganda foydalaniladi
+  quantity      DECIMAL(15, 4) NOT NULL DEFAULT 0,  -- joriy miqdor
+  min_quantity  DECIMAL(15, 4) DEFAULT 0,            -- ogohlantirish chegarasi
+  image_url     TEXT,
+  created_at    TIMESTAMP DEFAULT NOW(),
+  updated_at    TIMESTAMP DEFAULT NOW(),
+  UNIQUE (branch_id, name)
+);
+
+CREATE INDEX idx_inventory_branch ON inventory_items(branch_id);
+
+-- ============================================================
+-- MENYU MAHSULOTLARI (menu_items) — faqat menyuda ko'rinadigan narsa
+-- ============================================================
+CREATE TABLE menu_items (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  branch_id     UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  name          VARCHAR(200) NOT NULL,
+  price         DECIMAL(12, 2) NOT NULL DEFAULT 0,
+  type          TEXT NOT NULL DEFAULT 'food',        -- product_type kabi
+  is_available  BOOLEAN DEFAULT TRUE,
+  image_url     TEXT,
+  created_at    TIMESTAMP DEFAULT NOW(),
+  updated_at    TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_menu_items_branch ON menu_items(branch_id);
+
+-- ============================================================
+-- RETSEPT (recipe) — menu_item uchun kerakli ingredientlar
+-- ============================================================
+CREATE TABLE menu_item_recipes (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  menu_item_id    UUID NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+  inventory_item_id UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  quantity        DECIMAL(15, 4) NOT NULL,   -- 1 porsiyaga kerakli miqdor
+  created_at      TIMESTAMP DEFAULT NOW(),
+  UNIQUE (menu_item_id, inventory_item_id)
+);
+
+CREATE INDEX idx_recipe_menu_item ON menu_item_recipes(menu_item_id);
+CREATE INDEX idx_recipe_inventory ON menu_item_recipes(inventory_item_id);
+
+-- ============================================================
+-- OMBORXONA HARAKATLARI (inventory_logs) — kirish/chiqish logi
+-- ============================================================
+CREATE TABLE inventory_logs (
+  id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  branch_id         UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  inventory_item_id UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  change_amount     DECIMAL(15, 4) NOT NULL,  -- + qo'shildi, - ayirildi
+  reason            VARCHAR(200),              -- 'order', 'manual_add', 'adjustment'
+  order_id          UUID,                      -- agar buyurtma sababli bo'lsa
+  before_quantity   DECIMAL(15, 4),
+  after_quantity    DECIMAL(15, 4),
+  created_at        TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_inv_logs_branch ON inventory_logs(branch_id);
+CREATE INDEX idx_inv_logs_item   ON inventory_logs(inventory_item_id);
