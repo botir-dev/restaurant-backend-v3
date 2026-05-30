@@ -65,7 +65,6 @@ const getDashboard = async (req, res) => {
       table_overview: tableStatuses.rows[0]
     });
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
