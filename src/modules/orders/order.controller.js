@@ -104,7 +104,7 @@ const createOrder = async (req, res) => {
 
     const productIds = items.map(i => i.product_id);
     const productsResult = await client.query(
-      `SELECT id, name, price, type, is_available FROM products
+      `SELECT id, name, price, type, is_available FROM menu_items
        WHERE id = ANY($1) AND branch_id = $2`,
       [productIds, req.branchId]
     );
@@ -237,7 +237,7 @@ const updateOrder = async (req, res) => {
     if (items) {
       const productIds = items.map(i => i.product_id);
       const productsResult = await pool.query(
-        `SELECT id, name, price, type, is_available FROM products WHERE id = ANY($1) AND branch_id = $2`,
+        `SELECT id, name, price, type, is_available FROM menu_items WHERE id = ANY($1) AND branch_id = $2`,
         [productIds, req.branchId]
       );
       const productsMap = {};
