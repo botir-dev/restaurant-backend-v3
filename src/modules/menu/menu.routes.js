@@ -1,6 +1,6 @@
 const router = require('express').Router();
-const auth   = require('../../middleware/auth.middleware');
-const branch = require('../../middleware/branch.middleware');
+const { authenticate } = require('../../middleware/auth.middleware');
+const { branchFilter }  = require('../../middleware/branch.middleware');
 const {
   getMenuItems, createMenuItem, updateMenuItem,
   deleteMenuItem, toggleMenuAvailability
@@ -13,7 +13,7 @@ const canManage = (req, res, next) => {
   next();
 };
 
-router.use(auth, branch);
+router.use(authenticate, branchFilter);
 
 router.get('/',                      getMenuItems);
 router.post('/',                     canManage, createMenuItem);
