@@ -29,29 +29,43 @@ const getMenuItems = async (req, res) => {
     );
     const total = parseInt(countRes.rows[0].count);
 
-    const result = await pool.query(
-      `SELECT mi.*,
-         COALESCE(
-           json_agg(
-             json_build_object(
-               'id', r.id,
-               'inventory_item_id', r.inventory_item_id,
-               'inventory_name', inv.name,
-               'inventory_unit', inv.unit,
-               'inventory_custom_unit', inv.custom_unit,
-               'quantity', r.quantity
-             ) ORDER BY inv.name
-           ) FILTER (WHERE r.id IS NOT NULL), '[]'
-         ) AS recipe
-       FROM menu_items mi
-       LEFT JOIN menu_item_recipes r  ON r.menu_item_id = mi.id
-       LEFT JOIN inventory_items inv  ON inv.id = r.inventory_item_id
-       ${where}
-       GROUP BY mi.id
-       ORDER BY mi.type, mi.name
-       LIMIT $${idx} OFFSET $${idx+1}`,
-      [...params, limit, offset]
-    );
+    const canSeeRecipe = ['manager', 'storekeeper', 'super_admin'].includes(req.user.role);
+
+    let result;
+    if (canSeeRecipe) {
+      result = await pool.query(
+        `SELECT mi.*,
+           COALESCE(
+             json_agg(
+               json_build_object(
+                 'id', r.id,
+                 'inventory_item_id', r.inventory_item_id,
+                 'inventory_name', inv.name,
+                 'inventory_unit', inv.unit,
+                 'inventory_custom_unit', inv.custom_unit,
+                 'quantity', r.quantity
+               ) ORDER BY inv.name
+             ) FILTER (WHERE r.id IS NOT NULL), '[]'
+           ) AS recipe
+         FROM menu_items mi
+         LEFT JOIN menu_item_recipes r  ON r.menu_item_id = mi.id
+         LEFT JOIN inventory_items inv  ON inv.id = r.inventory_item_id
+         ${where}
+         GROUP BY mi.id
+         ORDER BY mi.type, mi.name
+         LIMIT $${idx} OFFSET $${idx+1}`,
+        [...params, limit, offset]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT mi.id, mi.name, mi.price, mi.type, mi.image_url, mi.is_available
+         FROM menu_items mi
+         ${where}
+         ORDER BY mi.type, mi.name
+         LIMIT $${idx} OFFSET $${idx+1}`,
+        [...params, limit, offset]
+      );
+    }
     return paginate(res, result.rows, total, page, limit);
   } catch (err) {
     console.error(err);
