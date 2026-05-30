@@ -22,7 +22,6 @@ router.get('/custom-roles', async (req, res) => {
     );
     return success(res, result.rows);
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 });
