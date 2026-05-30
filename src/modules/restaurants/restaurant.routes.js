@@ -15,7 +15,6 @@ router.get('/me', authenticate, branchFilter, async (req, res) => {
     if (result.rows.length === 0) return error(res, 'Restoran topilmadi', 404);
     return success(res, result.rows[0]);
   } catch (err) {
-    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 });
