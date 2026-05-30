@@ -26,8 +26,13 @@ const getInventory = async (req, res) => {
     );
     const total = parseInt(countResult.rows[0].count);
 
+    const canSeeCost = ['manager', 'storekeeper', 'super_admin'].includes(req.user.role);
+
     const result = await pool.query(
-      `SELECT * FROM inventory_items ${where}
+      `SELECT id, restaurant_id, branch_id, name, unit, custom_unit,
+              quantity, min_quantity, image_url, created_at, updated_at
+              ${canSeeCost ? ", cost_price, purchased_at, ROUND(quantity * COALESCE(cost_price, 0), 2) AS total_cost" : ""}
+       FROM inventory_items ${where}
        ORDER BY name ASC LIMIT $${idx} OFFSET $${idx + 1}`,
       [...params, limit, offset]
     );
@@ -40,7 +45,7 @@ const getInventory = async (req, res) => {
 
 // POST /inventory
 const createInventoryItem = async (req, res) => {
-  const { name, unit, custom_unit, quantity, min_quantity, image_url } = req.body;
+  const { name, unit, custom_unit, quantity, min_quantity, image_url, cost_price, purchased_at } = req.body;
   if (!name || !name.trim()) return error(res, 'Nom talab qilinadi');
   if (!VALID_UNITS.includes(unit)) return error(res, "Noto'g'ri birlik turi");
   if (unit === 'custom' && (!custom_unit || !custom_unit.trim()))
@@ -50,13 +55,21 @@ const createInventoryItem = async (req, res) => {
   const minQty = parseFloat(min_quantity) || 0;
   if (qty < 0) return error(res, "Miqdor manfiy bo'lmasligi kerak");
 
+  const costPrice = cost_price !== undefined ? parseFloat(cost_price) : null;
+  if (costPrice !== null && (isNaN(costPrice) || costPrice < 0))
+    return error(res, "Tannarx 0 dan katta bo'lishi kerak");
+
+  const purchasedAt = purchased_at ? new Date(purchased_at) : new Date();
+  if (isNaN(purchasedAt.getTime())) return error(res, "purchased_at sana formati noto'g'ri");
+
   try {
     const result = await pool.query(
       `INSERT INTO inventory_items
-         (id, restaurant_id, branch_id, name, unit, custom_unit, quantity, min_quantity, image_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+         (id, restaurant_id, branch_id, name, unit, custom_unit, quantity, min_quantity, image_url, cost_price, purchased_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [uuidv4(), req.restaurantId, req.branchId,
-       name.trim(), unit, custom_unit?.trim() || null, qty, minQty, image_url || null]
+       name.trim(), unit, custom_unit?.trim() || null, qty, minQty, image_url || null,
+       costPrice, purchasedAt]
     );
     return created(res, result.rows[0], "Omborxona mahsuloti qo'shildi");
   } catch (err) {
@@ -69,22 +82,32 @@ const createInventoryItem = async (req, res) => {
 // PUT /inventory/:id
 const updateInventoryItem = async (req, res) => {
   const { id } = req.params;
-  const { name, unit, custom_unit, quantity, min_quantity, image_url } = req.body;
+  const { name, unit, custom_unit, quantity, min_quantity, image_url, cost_price, purchased_at } = req.body;
 
   if (unit !== undefined && !VALID_UNITS.includes(unit))
     return error(res, "Noto'g'ri birlik turi");
 
+  const costPrice = cost_price !== undefined ? parseFloat(cost_price) : undefined;
+  if (costPrice !== undefined && (isNaN(costPrice) || costPrice < 0))
+    return error(res, "Tannarx 0 dan katta bo'lishi kerak");
+
+  const purchasedAt = purchased_at ? new Date(purchased_at) : undefined;
+  if (purchasedAt !== undefined && isNaN(purchasedAt.getTime()))
+    return error(res, "purchased_at sana formati noto'g'ri");
+
   try {
     const result = await pool.query(
       `UPDATE inventory_items SET
-         name        = COALESCE($1, name),
-         unit        = COALESCE($2, unit),
-         custom_unit = COALESCE($3, custom_unit),
-         quantity    = COALESCE($4, quantity),
-         min_quantity= COALESCE($5, min_quantity),
-         image_url   = COALESCE($6, image_url),
-         updated_at  = NOW()
-       WHERE id = $7 AND branch_id = $8 RETURNING *`,
+         name         = COALESCE($1, name),
+         unit         = COALESCE($2, unit),
+         custom_unit  = COALESCE($3, custom_unit),
+         quantity     = COALESCE($4, quantity),
+         min_quantity = COALESCE($5, min_quantity),
+         image_url    = COALESCE($6, image_url),
+         cost_price   = COALESCE($7, cost_price),
+         purchased_at = COALESCE($8, purchased_at),
+         updated_at   = NOW()
+       WHERE id = $9 AND branch_id = $10 RETURNING *`,
       [
         name?.trim() || null,
         unit || null,
@@ -92,6 +115,8 @@ const updateInventoryItem = async (req, res) => {
         quantity !== undefined ? parseFloat(quantity) : null,
         min_quantity !== undefined ? parseFloat(min_quantity) : null,
         image_url !== undefined ? (image_url || null) : undefined,
+        costPrice !== undefined ? costPrice : null,
+        purchasedAt !== undefined ? purchasedAt : null,
         id, req.branchId
       ]
     );
@@ -107,10 +132,17 @@ const updateInventoryItem = async (req, res) => {
 // PATCH /inventory/:id/add  — omborga qo'shimcha qo'shish
 const addStock = async (req, res) => {
   const { id } = req.params;
-  const { amount } = req.body;
+  const { amount, cost_price, purchased_at } = req.body;
   const addAmt = parseFloat(amount);
   if (isNaN(addAmt) || addAmt <= 0)
     return error(res, "Miqdor 0 dan katta bo'lishi kerak");
+
+  const newCostPrice = cost_price !== undefined ? parseFloat(cost_price) : null;
+  if (newCostPrice !== null && (isNaN(newCostPrice) || newCostPrice < 0))
+    return error(res, "Tannarx 0 dan katta bo'lishi kerak");
+
+  const purchasedAt = purchased_at ? new Date(purchased_at) : new Date();
+  if (isNaN(purchasedAt.getTime())) return error(res, "purchased_at sana formati noto'g'ri");
 
   const client = await pool.connect();
   try {
@@ -127,8 +159,13 @@ const addStock = async (req, res) => {
     const after  = before + addAmt;
 
     await client.query(
-      `UPDATE inventory_items SET quantity = $1, updated_at = NOW() WHERE id = $2`,
-      [after, id]
+      `UPDATE inventory_items SET
+         quantity     = $1,
+         cost_price   = COALESCE($2, cost_price),
+         purchased_at = $3,
+         updated_at   = NOW()
+       WHERE id = $4`,
+      [after, newCostPrice, purchasedAt, id]
     );
     await client.query(
       `INSERT INTO inventory_logs
