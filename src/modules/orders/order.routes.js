@@ -13,6 +13,8 @@ router.get('/', authorize(
 ), c.getOrders);
 
 router.post('/', authorize('waiter'), c.createOrder);
+router.get('/cashier', authorize('cashier', 'manager'), c.getCashierOrders);
+router.post('/cashier', authorize('cashier'), c.createCashierOrder);
 router.put('/:id', authorize('waiter', 'manager'), c.updateOrder);
 router.patch('/:id/send', authorize('waiter'), c.sendToKitchen);
 router.patch('/:id/complete', authorize('waiter'), c.completeOrder);
