@@ -130,7 +130,8 @@ const processPayment = async (req, res) => {
     }, "To'lov qabul qilindi");
 
   } catch (err) {
-    return error(res, 'Server xatosi', 500);
+    console.error('[processPayment ERROR]', err.message, err.stack);
+    return error(res, err.message || 'Server xatosi', 500);
   }
 };
 
@@ -198,7 +199,8 @@ const generateCheck = async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="check-${orderId}.txt"`);
     return res.send(text);
   } catch (err) {
-    return error(res, 'Server xatosi', 500);
+    console.error('[processPayment ERROR]', err.message, err.stack);
+    return error(res, err.message || 'Server xatosi', 500);
   }
 };
 
