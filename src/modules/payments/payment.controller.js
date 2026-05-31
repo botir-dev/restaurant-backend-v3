@@ -32,15 +32,23 @@ const processPayment = async (req, res) => {
     if (totalAmount < 0) return error(res, "Buyurtma summasi noto'g'ri", 400);
 
     const settingsResult = await pool.query(
-      `SELECT service_fee_percent, waiter_commission_percent FROM branch_settings WHERE branch_id = $1`,
+      `SELECT service_fee_percent, service_fee_enabled,
+              vat_percent, vat_enabled,
+              waiter_commission_percent, role_commissions
+       FROM branch_settings WHERE branch_id = $1`,
       [req.branchId]
     );
-    const settings = settingsResult.rows[0] || { service_fee_percent: 0, waiter_commission_percent: 0 };
-    const serviceFeePercent      = parseFloat(settings.service_fee_percent) || 0;
+    const settings = settingsResult.rows[0] || {};
+    const serviceFeeEnabled       = settings.service_fee_enabled === true;
+    const serviceFeePercent       = serviceFeeEnabled ? (parseFloat(settings.service_fee_percent) || 0) : 0;
+    const vatEnabled              = settings.vat_enabled === true;
+    const vatPercent              = vatEnabled ? (parseFloat(settings.vat_percent) || 0) : 0;
     const waiterCommissionPercent = parseFloat(settings.waiter_commission_percent) || 0;
+    const roleCommissions         = settings.role_commissions || {};
 
     const serviceFeeAmount = Math.round((totalAmount * serviceFeePercent) / 100);
-    const grandTotal       = totalAmount + serviceFeeAmount;
+    const vatAmount        = Math.round((totalAmount * vatPercent) / 100);
+    const grandTotal       = totalAmount + serviceFeeAmount + vatAmount;
     const waiterEarned     = Math.round((totalAmount * waiterCommissionPercent) / 100);
 
     await pool.query(
@@ -57,20 +65,24 @@ const processPayment = async (req, res) => {
         id, order_id, restaurant_id, branch_id, table_number,
         waiter_id, waiter_name, cashier_id, cashier_name,
         guest_count, items, total_amount, service_fee_percent,
-        service_fee_amount, grand_total, payment_type, is_from_qr, service_started, service_ended
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NOW())`,
+        service_fee_amount, vat_percent, vat_amount, grand_total,
+        payment_type, is_from_qr, service_started, service_ended
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW())`,
       [
         uuidv4(), orderId, order.restaurant_id, order.branch_id,
         order.table_number, order.waiter_id, order.waiter_name,
         req.user.user_id, req.user.full_name || 'Kassir',
         order.guest_count, JSON.stringify(order.items),
-        totalAmount, serviceFeePercent, serviceFeeAmount, grandTotal,
+        totalAmount, serviceFeePercent, serviceFeeAmount,
+        vatPercent, vatAmount, grandTotal,
         payment_type, order.is_from_qr, order.created_at,
       ]
     );
 
+    const today = new Date().toISOString().split('T')[0];
+
+    // Waiter earnings (ofitsiant)
     if (order.waiter_id && waiterCommissionPercent > 0) {
-      const today = new Date().toISOString().split('T')[0];
       await pool.query(
         `INSERT INTO waiter_earnings (waiter_id, branch_id, date, total_orders, total_order_amount, commission_percent, earned_amount)
          VALUES ($1, $2, $3, 1, $4, $5, $6)
@@ -84,9 +96,34 @@ const processPayment = async (req, res) => {
       );
     }
 
+    // Role earnings — barcha rollar uchun (cashier, cook, etc.)
+    // Kassir (to'lov qilgan odam) uchun role_commission
+    const cashierRole = req.user.role;
+    const cashierUserRes = await pool.query(
+      `SELECT use_commission FROM users WHERE id = $1`,
+      [req.user.user_id]
+    );
+    const cashierUseCommission = cashierUserRes.rows[0]?.use_commission === true;
+    if (cashierUseCommission && roleCommissions[cashierRole] > 0) {
+      const cashierCommPercent = parseFloat(roleCommissions[cashierRole]);
+      const cashierEarned = Math.round((totalAmount * cashierCommPercent) / 100);
+      await pool.query(
+        `INSERT INTO role_earnings (user_id, branch_id, date, role, total_orders, total_order_amount, commission_percent, earned_amount)
+         VALUES ($1, $2, $3, $4, 1, $5, $6, $7)
+         ON CONFLICT (user_id, date) DO UPDATE SET
+           total_orders       = role_earnings.total_orders + 1,
+           total_order_amount = role_earnings.total_order_amount + $5,
+           commission_percent = $6,
+           earned_amount      = role_earnings.earned_amount + $7,
+           updated_at         = NOW()`,
+        [req.user.user_id, req.branchId, today, cashierRole, totalAmount, cashierCommPercent, cashierEarned]
+      );
+    }
+
     return success(res, {
       order_id: orderId, total_amount: totalAmount,
       service_fee_percent: serviceFeePercent, service_fee_amount: serviceFeeAmount,
+      vat_percent: vatPercent, vat_amount: vatAmount,
       grand_total: grandTotal, payment_type,
     }, "To'lov qabul qilindi");
 
@@ -124,6 +161,8 @@ const generateCheck = async (req, res) => {
     const serviceEnd   = new Date(a.service_ended || Date.now()).toLocaleString('uz-UZ');
     const sfp  = parseFloat(a.service_fee_percent) || 0;
     const sfa  = parseFloat(a.service_fee_amount) || 0;
+    const vp   = parseFloat(a.vat_percent) || 0;
+    const va   = parseFloat(a.vat_amount) || 0;
     const gt   = parseFloat(a.grand_total) || parseFloat(a.total_amount) || 0;
 
     let text = '';
@@ -146,6 +185,7 @@ const generateCheck = async (req, res) => {
     text += line + '\n';
     text += row("Mahsulotlar:", fmt(a.total_amount) + " so'm") + '\n';
     if (sfp > 0) text += row(`Xizmat haqi (${sfp}%):`, fmt(sfa) + " so'm") + '\n';
+    if (vp > 0)  text += row(`QQS (${vp}%):`, fmt(va) + " so'm") + '\n';
     text += row('JAMI:', fmt(gt) + " so'm") + '\n';
     text += row("To'lov turi:", a.payment_type === 'cash' ? 'Naqd' : a.payment_type === 'card' ? 'Karta' : 'QR') + '\n';
     text += line + '\n';
