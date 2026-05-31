@@ -74,7 +74,7 @@ const processPayment = async (req, res) => {
         uuidv4(), orderId, order.restaurant_id, order.branch_id,
         order.table_number, order.waiter_id, order.waiter_name,
         req.user.user_id, req.user.full_name || 'Kassir',
-        order.guest_count, JSON.stringify(order.items),
+        order.guest_count, order.items,
         totalAmount, serviceFeePercent, serviceFeeAmount,
         vatPercent, vatAmount, grandTotal,
         payment_type, order.is_from_qr, order.order_type || 'table', order.created_at,
