@@ -101,9 +101,5 @@ router.get('/me/earnings', authenticate, branchFilter, async (req, res) => {
     return error(res, 'Server xatosi', 500);
   }
 });
-  } catch (err) {
-    return error(res, 'Server xatosi', 500);
-  }
-});
 
 module.exports = router;
