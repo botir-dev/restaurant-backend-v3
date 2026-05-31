@@ -472,8 +472,8 @@ const createCashierOrder = async (req, res) => {
     let virtualTableId;
     if (virtualTableResult.rows.length === 0) {
       const newTable = await client.query(
-        `INSERT INTO tables (id, restaurant_id, branch_id, table_number, capacity)
-         VALUES ($1, $2, $3, 0, 999) RETURNING id`,
+        `INSERT INTO tables (id, restaurant_id, branch_id, table_number, capacity, is_virtual)
+         VALUES ($1, $2, $3, 0, 999, TRUE) RETURNING id`,
         [uuidv4(), req.user.restaurant_id, req.branchId]
       );
       virtualTableId = newTable.rows[0].id;
