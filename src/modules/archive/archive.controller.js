@@ -378,9 +378,393 @@ const getTopTablesReport = async (req, res) => {
   }
 };
 
+
+
+// ─── YANGI HISOBOTLAR ─────────────────────────────────────────
+
+// GET /archive/reports/product-history?from=&to=
+const getProductHistoryReport = async (req, res) => {
+  const { from, to } = req.query;
+  try {
+    let where = `WHERE l.branch_id = $1 AND l.change_amount > 0`;
+    const params = [req.branchId];
+    let idx = 2;
+    if (from) { params.push(new Date(from).toISOString()); where += ` AND l.created_at >= $${idx++}`; }
+    if (to)   { params.push(new Date(to).toISOString());   where += ` AND l.created_at <= $${idx++}`; }
+
+    const rows = await pool.query(`
+      SELECT
+        l.id,
+        i.name                                     AS product_name,
+        i.unit,
+        i.custom_unit,
+        l.change_amount                            AS quantity,
+        i.cost_price                               AS unit_cost,
+        ROUND(l.change_amount * COALESCE(i.cost_price, 0), 2) AS total_cost,
+        l.reason,
+        TO_CHAR(l.created_at, 'YYYY-MM-DD')        AS date,
+        TO_CHAR(l.created_at, 'HH24:MI')           AS time,
+        l.created_at
+      FROM inventory_logs l
+      JOIN inventory_items i ON i.id = l.inventory_item_id
+      ${where}
+      ORDER BY l.created_at DESC
+    `, params);
+
+    // Mahsulot bo'yicha umumiy xulosa
+    const summary = await pool.query(`
+      SELECT
+        i.name                                             AS product_name,
+        i.unit,
+        i.custom_unit,
+        i.cost_price                                       AS unit_cost,
+        SUM(l.change_amount)                               AS total_quantity,
+        ROUND(SUM(l.change_amount * COALESCE(i.cost_price, 0)), 2) AS total_cost
+      FROM inventory_logs l
+      JOIN inventory_items i ON i.id = l.inventory_item_id
+      ${where}
+      GROUP BY i.name, i.unit, i.custom_unit, i.cost_price
+      ORDER BY total_cost DESC
+    `, params);
+
+    const grandTotal = summary.rows.reduce((s, r) => s + parseFloat(r.total_cost || 0), 0);
+
+    return success(res, { rows: rows.rows, summary: summary.rows, grand_total: grandTotal });
+  } catch (err) {
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
+// GET /archive/reports/expenses-30?electricity=&water=&gas=
+const getExpenses30Report = async (req, res) => {
+  const electricity = parseFloat(req.query.electricity) || 0;
+  const water       = parseFloat(req.query.water)       || 0;
+  const gas         = parseFloat(req.query.gas)         || 0;
+
+  try {
+    const branchId = req.branchId;
+    const now = new Date();
+    const to   = now.toISOString();
+    const from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    // ── 1. Ombor harajatlari (kiruvchi mahsulotlar) ───────────
+    const inventoryRows = await pool.query(`
+      SELECT
+        i.name                                              AS product_name,
+        i.unit,
+        i.custom_unit,
+        i.cost_price                                        AS unit_cost,
+        SUM(l.change_amount)                                AS total_quantity,
+        ROUND(SUM(l.change_amount * COALESCE(i.cost_price,0)), 2) AS total_cost
+      FROM inventory_logs l
+      JOIN inventory_items i ON i.id = l.inventory_item_id
+      WHERE l.branch_id = $1 AND l.change_amount > 0
+        AND l.created_at >= $2 AND l.created_at <= $3
+      GROUP BY i.name, i.unit, i.custom_unit, i.cost_price
+      ORDER BY total_cost DESC
+    `, [branchId, from, to]);
+
+    const totalInventory = inventoryRows.rows.reduce((s, r) => s + parseFloat(r.total_cost || 0), 0);
+
+    // ── 2. Hodimlar maoshi ────────────────────────────────────
+    // a) commission (foiz) asosida maosh
+    const commissionStaff = await pool.query(`
+      SELECT
+        u.full_name,
+        u.role,
+        u.use_commission,
+        u.monthly_salary,
+        SUM(COALESCE(we.earned_amount, 0)) AS earned
+      FROM users u
+      LEFT JOIN waiter_earnings we
+        ON we.waiter_id = u.id
+       AND we.branch_id = u.branch_id
+       AND we.date >= $2::date
+       AND we.date <= $3::date
+      WHERE u.branch_id = $1
+        AND u.is_active = TRUE
+        AND u.use_commission = TRUE
+        AND u.role NOT IN ('super_admin')
+      GROUP BY u.id, u.full_name, u.role, u.use_commission, u.monthly_salary
+      ORDER BY u.full_name
+    `, [branchId, from, to]);
+
+    // b) Oylik maosh birikadirilganlar
+    const monthlySalaryStaff = await pool.query(`
+      SELECT
+        u.full_name,
+        u.role,
+        u.monthly_salary,
+        u.use_commission
+      FROM users u
+      WHERE u.branch_id = $1
+        AND u.is_active = TRUE
+        AND u.monthly_salary IS NOT NULL
+        AND u.monthly_salary > 0
+        AND (u.use_commission IS NULL OR u.use_commission = FALSE)
+        AND u.role NOT IN ('super_admin')
+      ORDER BY u.full_name
+    `, [branchId]);
+
+    const totalCommission = commissionStaff.rows.reduce((s, r) => s + parseFloat(r.earned || 0), 0);
+    const totalMonthly    = monthlySalaryStaff.rows.reduce((s, r) => s + parseFloat(r.monthly_salary || 0), 0);
+    const totalSalary     = totalCommission + totalMonthly;
+
+    // ── 3. Buyurtmalar statistikasi ───────────────────────────
+    const ordersRes = await pool.query(`
+      SELECT
+        COUNT(*)                                                    AS total_orders,
+        SUM(total_amount + COALESCE(service_fee_amount, 0))        AS total_revenue,
+        SUM(COALESCE(vat_amount, 0))                               AS total_vat
+      FROM order_archive
+      WHERE branch_id = $1
+        AND created_at >= $2 AND created_at <= $3
+    `, [branchId, from, to]);
+
+    const ordersData = ordersRes.rows[0];
+    const totalRevenue = parseFloat(ordersData.total_revenue || 0);
+    const totalVat     = parseFloat(ordersData.total_vat || 0);
+
+    // QQS 12% hisoblash (agar vat_amount yo'q bo'lsa daromaddan 12% hisoblaymiz)
+    const vatAmount = totalVat > 0 ? totalVat : Math.round(totalRevenue * 0.12);
+
+    // ── 4. Umumiy harajat ─────────────────────────────────────
+    const totalUtilities = electricity + water + gas;
+    const totalExpenses  = vatAmount + totalUtilities + totalSalary + totalInventory;
+
+    return success(res, {
+      period: { from, to },
+      inventory: { rows: inventoryRows.rows, total: totalInventory },
+      salary: {
+        commission_staff: commissionStaff.rows,
+        monthly_staff: monthlySalaryStaff.rows,
+        total_commission: totalCommission,
+        total_monthly: totalMonthly,
+        total: totalSalary,
+      },
+      utilities: { electricity, water, gas, total: totalUtilities },
+      orders: {
+        total_orders: parseInt(ordersData.total_orders || 0),
+        total_revenue: totalRevenue,
+        vat_amount: vatAmount,
+      },
+      grand_total: totalExpenses,
+    });
+  } catch (err) {
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
+// GET /archive/reports/delivery?from=&to=
+const getDeliveryReport = async (req, res) => {
+  const { from, to } = req.query;
+  try {
+    let where = `WHERE branch_id = $1 AND order_type = 'delivery'`;
+    const params = [req.branchId];
+    let idx = 2;
+    if (from) { params.push(new Date(from).toISOString()); where += ` AND created_at >= $${idx++}`; }
+    if (to)   { params.push(new Date(to).toISOString());   where += ` AND created_at <= $${idx++}`; }
+
+    const rows = await pool.query(`
+      SELECT
+        TO_CHAR(created_at, 'YYYY-MM-DD') AS date,
+        TO_CHAR(created_at, 'HH24:MI')    AS time,
+        order_id,
+        waiter_name,
+        cashier_name,
+        items,
+        total_amount,
+        service_fee_amount,
+        grand_total,
+        payment_type,
+        created_at
+      FROM order_archive ${where}
+      ORDER BY created_at DESC
+    `, params);
+
+    const daily = await pool.query(`
+      SELECT
+        TO_CHAR(created_at, 'YYYY-MM-DD') AS date,
+        COUNT(*)                           AS order_count,
+        SUM(jsonb_array_length(items))     AS item_count,
+        SUM(grand_total)                   AS revenue
+      FROM order_archive ${where}
+      GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD')
+      ORDER BY date DESC
+    `, params);
+
+    const summary = await pool.query(`
+      SELECT
+        COUNT(*)                        AS total_orders,
+        SUM(jsonb_array_length(items))  AS total_items,
+        SUM(grand_total)                AS total_revenue
+      FROM order_archive ${where}
+    `, params);
+
+    return success(res, {
+      rows: rows.rows,
+      daily: daily.rows,
+      summary: summary.rows[0],
+    });
+  } catch (err) {
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
+// GET /archive/reports/takeaway?from=&to=
+const getTakeawayReport = async (req, res) => {
+  const { from, to } = req.query;
+  try {
+    let where = `WHERE branch_id = $1 AND order_type = 'takeaway'`;
+    const params = [req.branchId];
+    let idx = 2;
+    if (from) { params.push(new Date(from).toISOString()); where += ` AND created_at >= $${idx++}`; }
+    if (to)   { params.push(new Date(to).toISOString());   where += ` AND created_at <= $${idx++}`; }
+
+    const rows = await pool.query(`
+      SELECT
+        TO_CHAR(created_at, 'YYYY-MM-DD') AS date,
+        TO_CHAR(created_at, 'HH24:MI')    AS time,
+        order_id,
+        waiter_name,
+        cashier_name,
+        items,
+        total_amount,
+        service_fee_amount,
+        grand_total,
+        payment_type,
+        created_at
+      FROM order_archive ${where}
+      ORDER BY created_at DESC
+    `, params);
+
+    const daily = await pool.query(`
+      SELECT
+        TO_CHAR(created_at, 'YYYY-MM-DD') AS date,
+        COUNT(*)                           AS order_count,
+        SUM(jsonb_array_length(items))     AS item_count,
+        SUM(grand_total)                   AS revenue
+      FROM order_archive ${where}
+      GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD')
+      ORDER BY date DESC
+    `, params);
+
+    const summary = await pool.query(`
+      SELECT
+        COUNT(*)                        AS total_orders,
+        SUM(jsonb_array_length(items))  AS total_items,
+        SUM(grand_total)                AS total_revenue
+      FROM order_archive ${where}
+    `, params);
+
+    return success(res, {
+      rows: rows.rows,
+      daily: daily.rows,
+      summary: summary.rows[0],
+    });
+  } catch (err) {
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
+// GET /archive/reports/last-30-days-extended
+// Oxirgi 30 kun + oldingi 30 kun solishtirish, haftalik, yillik
+const getLast30DaysExtended = async (req, res) => {
+  try {
+    const branchId = req.branchId;
+    const now = new Date();
+
+    const cur_to   = now.toISOString();
+    const cur_from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const prev_to  = cur_from;
+    const prev_from = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Joriy 30 kun
+    const curPeriod = await pool.query(`
+      SELECT COUNT(*) AS orders, SUM(grand_total) AS revenue
+      FROM order_archive
+      WHERE branch_id = $1 AND created_at >= $2 AND created_at < $3
+    `, [branchId, cur_from, cur_to]);
+
+    // O'tgan 30 kun
+    const prevPeriod = await pool.query(`
+      SELECT COUNT(*) AS orders, SUM(grand_total) AS revenue
+      FROM order_archive
+      WHERE branch_id = $1 AND created_at >= $2 AND created_at < $3
+    `, [branchId, prev_from, prev_to]);
+
+    // Haftalik solishtirish (4 hafta)
+    const weeklyRows = await pool.query(`
+      SELECT
+        DATE_TRUNC('week', created_at) AS week_start,
+        COUNT(*)                        AS orders,
+        SUM(grand_total)                AS revenue
+      FROM order_archive
+      WHERE branch_id = $1 AND created_at >= $2
+      GROUP BY DATE_TRUNC('week', created_at)
+      ORDER BY week_start DESC
+      LIMIT 8
+    `, [branchId, prev_from]);
+
+    // Oylik solishtirish (12 oy)
+    const monthlyRows = await pool.query(`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') AS month,
+        COUNT(*)                                             AS orders,
+        SUM(grand_total)                                     AS revenue
+      FROM order_archive
+      WHERE branch_id = $1 AND created_at >= NOW() - INTERVAL '12 months'
+      GROUP BY DATE_TRUNC('month', created_at)
+      ORDER BY month DESC
+    `, [branchId]);
+
+    // Yillik solishtirish (3 yil)
+    const yearlyRows = await pool.query(`
+      SELECT
+        EXTRACT(YEAR FROM created_at)::int AS year,
+        COUNT(*)                           AS orders,
+        SUM(grand_total)                   AS revenue
+      FROM order_archive
+      WHERE branch_id = $1
+      GROUP BY EXTRACT(YEAR FROM created_at)
+      ORDER BY year DESC
+      LIMIT 3
+    `, [branchId]);
+
+    const cur  = curPeriod.rows[0];
+    const prev = prevPeriod.rows[0];
+    const curOrders  = parseInt(cur.orders  || 0);
+    const prevOrders = parseInt(prev.orders || 0);
+    const curRev     = parseFloat(cur.revenue  || 0);
+    const prevRev    = parseFloat(prev.revenue || 0);
+
+    const orderGrowth  = prevOrders > 0 ? Math.round(((curOrders - prevOrders) / prevOrders) * 100) : null;
+    const revenueGrowth = prevRev   > 0 ? Math.round(((curRev - prevRev) / prevRev) * 100)          : null;
+
+    return success(res, {
+      current_30:  { orders: curOrders,  revenue: curRev,  from: cur_from, to: cur_to },
+      previous_30: { orders: prevOrders, revenue: prevRev, from: prev_from, to: prev_to },
+      order_growth_pct:   orderGrowth,
+      revenue_growth_pct: revenueGrowth,
+      weekly:  weeklyRows.rows,
+      monthly: monthlyRows.rows,
+      yearly:  yearlyRows.rows,
+    });
+  } catch (err) {
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
 module.exports = {
   getArchive, getRevenue,
   getRevenueReport, getTopProductsReport, getLast30DaysReport,
   getWaiterSalaryReport, getTopWaitersReport,
   getOrderHistoryReport, getTopTablesReport,
+  getProductHistoryReport, getExpenses30Report,
+  getDeliveryReport, getTakeawayReport, getLast30DaysExtended,
 };
