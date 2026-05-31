@@ -78,9 +78,39 @@ const initDB = async () => {
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE UNIQUE,
       service_fee_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
+      service_fee_enabled BOOLEAN DEFAULT FALSE,
+      vat_percent DECIMAL(5,2) DEFAULT 0,
+      vat_enabled BOOLEAN DEFAULT FALSE,
       waiter_commission_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
+      role_commissions JSONB DEFAULT '{}',
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
+    )`);
+
+    // branch_settings migration
+    try { await pool.query(`ALTER TABLE branch_settings ADD COLUMN IF NOT EXISTS service_fee_enabled BOOLEAN DEFAULT FALSE`); } catch(_) {}
+    try { await pool.query(`ALTER TABLE branch_settings ADD COLUMN IF NOT EXISTS vat_percent DECIMAL(5,2) DEFAULT 0`); } catch(_) {}
+    try { await pool.query(`ALTER TABLE branch_settings ADD COLUMN IF NOT EXISTS vat_enabled BOOLEAN DEFAULT FALSE`); } catch(_) {}
+    try { await pool.query(`ALTER TABLE branch_settings ADD COLUMN IF NOT EXISTS role_commissions JSONB DEFAULT \'{}\'`); } catch(_) {}
+
+    // order_archive migration
+    try { await pool.query(`ALTER TABLE order_archive ADD COLUMN IF NOT EXISTS vat_percent DECIMAL(5,2) DEFAULT 0`); } catch(_) {}
+    try { await pool.query(`ALTER TABLE order_archive ADD COLUMN IF NOT EXISTS vat_amount DECIMAL(12,2) DEFAULT 0`); } catch(_) {}
+
+    // role_earnings jadvali
+    await pool.query(`CREATE TABLE IF NOT EXISTS role_earnings (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      role VARCHAR(100),
+      total_orders INTEGER NOT NULL DEFAULT 0,
+      total_order_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      commission_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
+      earned_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE (user_id, date)
     )`);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS waiter_earnings (
