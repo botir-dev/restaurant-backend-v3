@@ -40,7 +40,9 @@ const processPayment = async (req, res) => {
     );
     const settings = settingsResult.rows[0] || {};
     const serviceFeeEnabled       = settings.service_fee_enabled === true;
-    const serviceFeePercent       = serviceFeeEnabled ? (parseFloat(settings.service_fee_percent) || 0) : 0;
+    // Saboy/dostavka buyurtmalarida xizmat haqi olinmaydi
+    const isCashierOrder = ['takeaway', 'delivery'].includes(order.order_type);
+    const serviceFeePercent       = (serviceFeeEnabled && !isCashierOrder) ? (parseFloat(settings.service_fee_percent) || 0) : 0;
     const vatEnabled              = settings.vat_enabled === true;
     const vatPercent              = vatEnabled ? (parseFloat(settings.vat_percent) || 0) : 0;
     const waiterCommissionPercent = parseFloat(settings.waiter_commission_percent) || 0;
@@ -66,8 +68,8 @@ const processPayment = async (req, res) => {
         waiter_id, waiter_name, cashier_id, cashier_name,
         guest_count, items, total_amount, service_fee_percent,
         service_fee_amount, vat_percent, vat_amount, grand_total,
-        payment_type, is_from_qr, service_started, service_ended
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW())`,
+        payment_type, is_from_qr, order_type, service_started, service_ended
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW())`,
       [
         uuidv4(), orderId, order.restaurant_id, order.branch_id,
         order.table_number, order.waiter_id, order.waiter_name,
@@ -75,7 +77,7 @@ const processPayment = async (req, res) => {
         order.guest_count, JSON.stringify(order.items),
         totalAmount, serviceFeePercent, serviceFeeAmount,
         vatPercent, vatAmount, grandTotal,
-        payment_type, order.is_from_qr, order.created_at,
+        payment_type, order.is_from_qr, order.order_type || 'table', order.created_at,
       ]
     );
 
