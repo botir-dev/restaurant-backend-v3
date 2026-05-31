@@ -107,12 +107,14 @@ const getRevenue = async (req, res) => {
     const result = await pool.query(
       `SELECT
          COUNT(*)  as total_orders,
-         SUM(grand_total) as total_revenue,
-         AVG(grand_total) as avg_order,
+         SUM(total_amount + COALESCE(service_fee_amount,0)) as total_revenue,
+         SUM(grand_total) as total_with_vat,
+         SUM(COALESCE(vat_amount,0)) as vat_collected,
+         AVG(total_amount + COALESCE(service_fee_amount,0)) as avg_order,
          SUM(service_fee_amount) as total_service_fee,
-         SUM(CASE WHEN payment_type = 'cash'       THEN grand_total ELSE 0 END) as cash_revenue,
-         SUM(CASE WHEN payment_type = 'card'       THEN grand_total ELSE 0 END) as card_revenue,
-         SUM(CASE WHEN payment_type = 'qr_payment' THEN grand_total ELSE 0 END) as qr_revenue
+         SUM(CASE WHEN payment_type = 'cash'       THEN total_amount + COALESCE(service_fee_amount,0) ELSE 0 END) as cash_revenue,
+         SUM(CASE WHEN payment_type = 'card'       THEN total_amount + COALESCE(service_fee_amount,0) ELSE 0 END) as card_revenue,
+         SUM(CASE WHEN payment_type = 'qr_payment' THEN total_amount + COALESCE(service_fee_amount,0) ELSE 0 END) as qr_revenue
        FROM order_archive ${where}`,
       params
     );
@@ -149,11 +151,12 @@ const getRevenueReport = async (req, res) => {
     const summary = await pool.query(`
       SELECT
         COUNT(*)                                                          as total_orders,
-        SUM(grand_total)                                                  as total_revenue,
-        AVG(grand_total)                                                  as avg_order,
-        SUM(CASE WHEN payment_type='cash'       THEN grand_total ELSE 0 END) as cash,
-        SUM(CASE WHEN payment_type='card'       THEN grand_total ELSE 0 END) as card,
-        SUM(CASE WHEN payment_type='qr_payment' THEN grand_total ELSE 0 END) as qr
+        SUM(total_amount + COALESCE(service_fee_amount,0))              as total_revenue,
+        SUM(COALESCE(vat_amount,0))                                       as vat_collected,
+        AVG(total_amount + COALESCE(service_fee_amount,0))              as avg_order,
+        SUM(CASE WHEN payment_type='cash'       THEN total_amount + COALESCE(service_fee_amount,0) ELSE 0 END) as cash,
+        SUM(CASE WHEN payment_type='card'       THEN total_amount + COALESCE(service_fee_amount,0) ELSE 0 END) as card,
+        SUM(CASE WHEN payment_type='qr_payment' THEN total_amount + COALESCE(service_fee_amount,0) ELSE 0 END) as qr
       FROM order_archive ${where}
     `, params);
 
@@ -204,11 +207,12 @@ const getLast30DaysReport = async (req, res) => {
       SELECT
         DATE(created_at) as date,
         COUNT(*) as orders,
-        SUM(grand_total) as revenue,
-        AVG(grand_total) as avg_order,
-        SUM(CASE WHEN payment_type='cash'       THEN grand_total ELSE 0 END) as cash,
-        SUM(CASE WHEN payment_type='card'       THEN grand_total ELSE 0 END) as card,
-        SUM(CASE WHEN payment_type='qr_payment' THEN grand_total ELSE 0 END) as qr
+        SUM(total_amount + COALESCE(service_fee_amount,0)) as revenue,
+        SUM(COALESCE(vat_amount,0)) as vat_collected,
+        AVG(total_amount + COALESCE(service_fee_amount,0)) as avg_order,
+        SUM(CASE WHEN payment_type='cash'       THEN total_amount + COALESCE(service_fee_amount,0) ELSE 0 END) as cash,
+        SUM(CASE WHEN payment_type='card'       THEN total_amount + COALESCE(service_fee_amount,0) ELSE 0 END) as card,
+        SUM(CASE WHEN payment_type='qr_payment' THEN total_amount + COALESCE(service_fee_amount,0) ELSE 0 END) as qr
       FROM order_archive
       WHERE branch_id = $1 AND created_at >= NOW() - INTERVAL '30 days'
       GROUP BY DATE(created_at)
@@ -216,7 +220,7 @@ const getLast30DaysReport = async (req, res) => {
     `, [req.branchId]);
 
     const total = await pool.query(`
-      SELECT COUNT(*) as orders, SUM(grand_total) as revenue
+      SELECT COUNT(*) as orders, SUM(total_amount + COALESCE(service_fee_amount,0)) as revenue
       FROM order_archive
       WHERE branch_id = $1 AND created_at >= NOW() - INTERVAL '30 days'
     `, [req.branchId]);
@@ -291,8 +295,8 @@ const getTopWaitersReport = async (req, res) => {
       SELECT
         waiter_id, waiter_name,
         COUNT(*) as total_orders,
-        SUM(grand_total) as total_revenue,
-        AVG(grand_total) as avg_order,
+        SUM(total_amount + COALESCE(service_fee_amount,0)) as total_revenue,
+        AVG(total_amount + COALESCE(service_fee_amount,0)) as avg_order,
         COUNT(DISTINCT DATE(created_at)) as working_days
       FROM order_archive ${where}
       GROUP BY waiter_id, waiter_name
@@ -347,8 +351,8 @@ const getTopTablesReport = async (req, res) => {
       SELECT
         table_number,
         COUNT(*) as total_orders,
-        SUM(grand_total) as total_revenue,
-        AVG(grand_total) as avg_order,
+        SUM(total_amount + COALESCE(service_fee_amount,0)) as total_revenue,
+        AVG(total_amount + COALESCE(service_fee_amount,0)) as avg_order,
         COUNT(DISTINCT DATE(created_at)) as active_days
       FROM order_archive ${where}
       GROUP BY table_number
