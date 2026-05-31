@@ -18,7 +18,7 @@ const validatePassword = (password) => {
 const getStaff = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, full_name, username, phone, role, extra_permissions, is_active, monthly_salary, created_at
+      `SELECT id, full_name, username, phone, role, extra_permissions, is_active, monthly_salary, use_commission, created_at
        FROM users
        WHERE branch_id = $1 AND restaurant_id = $2
          AND role != 'waiter' AND role != 'super_admin' AND is_active = TRUE
@@ -101,7 +101,7 @@ const updateStaff = async (req, res) => {
           password_hash = COALESCE($2, password_hash),
           updated_at = NOW()
          WHERE id = $3 AND branch_id = $4
-         RETURNING id, full_name, username, role, extra_permissions, monthly_salary`,
+         RETURNING id, full_name, username, role, extra_permissions, monthly_salary, use_commission`,
         [monthly_salary !== undefined ? monthly_salary : null, passwordHash, id, req.branchId]
       );
       return success(res, result.rows[0], 'Yangilandi');
@@ -125,6 +125,7 @@ const updateStaff = async (req, res) => {
       passwordHash = await bcrypt.hash(password, 12);
     }
 
+    const { use_commission } = req.body;
     const salary = monthly_salary !== undefined ? monthly_salary : null;
 
     const result = await pool.query(
@@ -135,10 +136,12 @@ const updateStaff = async (req, res) => {
         role = COALESCE($4, role),
         extra_permissions = COALESCE($5, extra_permissions),
         monthly_salary = COALESCE($6, monthly_salary),
+        use_commission = COALESCE($7, use_commission),
         updated_at = NOW()
-       WHERE id = $7 AND branch_id = $8
-       RETURNING id, full_name, username, role, extra_permissions, monthly_salary`,
-      [full_name, phone, passwordHash, role, extra_permissions, salary, id, req.branchId]
+       WHERE id = $8 AND branch_id = $9
+       RETURNING id, full_name, username, role, extra_permissions, monthly_salary, use_commission`,
+      [full_name, phone, passwordHash, role, extra_permissions, salary,
+       use_commission !== undefined ? use_commission : null, id, req.branchId]
     );
     if (result.rows.length === 0) return error(res, 'Hodim topilmadi', 404);
     return success(res, result.rows[0], 'Hodim yangilandi');
