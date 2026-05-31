@@ -377,9 +377,16 @@ const prepareItem = async (req, res) => {
     );
 
     if (allPrepared) {
-      wsManager.sendToUser(order.waiter_id, 'order_ready', {
-        message: 'Buyurtma tayyor!', order_id: id, table_id: order.table_id,
-      });
+      const notifyUserId = ['takeaway','delivery'].includes(order.order_type)
+        ? order.cashier_id || order.waiter_id
+        : order.waiter_id;
+      if (notifyUserId) {
+        wsManager.sendToUser(notifyUserId, 'order_ready', {
+          message: order.order_type === 'takeaway' ? 'Saboy tayyor!' :
+                   order.order_type === 'delivery' ? 'Dostavka tayyor!' : 'Buyurtma tayyor!',
+          order_id: id, table_id: order.table_id, order_type: order.order_type,
+        });
+      }
     }
 
     return success(res, { order_id: id, all_prepared: allPrepared, status: newStatus }, 'Item tayyor deb belgilandi');
@@ -412,4 +419,156 @@ const cancelOrder = async (req, res) => {
   }
 };
 
-module.exports = { getOrders, createOrder, updateOrder, sendToKitchen, completeOrder, prepareItem, cancelOrder };
+// ─── KASSIR BUYURTMASI (saboy/dostavka) ─────────────────────
+// POST /orders/cashier
+// Kassir to'g'ridan-to'g'ri buyurtma beradi, oshxonaga avtomatik ketadi
+const createCashierOrder = async (req, res) => {
+  const { items, order_type, guest_count, note } = req.body;
+
+  if (!order_type || !['takeaway', 'delivery'].includes(order_type)) {
+    return error(res, "order_type 'takeaway' yoki 'delivery' bo'lishi kerak");
+  }
+
+  const itemErr = validateItems(items);
+  if (itemErr) return error(res, itemErr);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Mahsulotlarni tekshirish
+    const productIds = items.map(i => i.product_id);
+    const productsResult = await client.query(
+      `SELECT id, name, price, type, is_available FROM menu_items
+       WHERE id = ANY($1) AND branch_id = $2`,
+      [productIds, req.branchId]
+    );
+    const productsMap = {};
+    productsResult.rows.forEach(p => { productsMap[p.id] = p; });
+
+    const enrichedItems = [];
+    for (const item of items) {
+      const product = productsMap[item.product_id];
+      if (!product) { await client.query('ROLLBACK'); return error(res, `Mahsulot topilmadi: ${item.product_id}`); }
+      if (!product.is_available) { await client.query('ROLLBACK'); return error(res, `Mahsulot mavjud emas: ${product.name}`); }
+      enrichedItems.push({
+        item_id:     uuidv4(),
+        product_id:  product.id,
+        name:        product.name,
+        price:       parseFloat(product.price),
+        type:        product.type,
+        quantity:    parseInt(item.quantity) || 1,
+        is_prepared: false,
+      });
+    }
+
+    // "Kassir stoli" — virtual stol (table_id = null bo'lmaydi, lekin
+    // kassir buyurtmalari uchun maxsus virtual stol yaratamiz yoki mavjudini ishlatamiz)
+    // Yechim: branch uchun "kassir" nomli virtual stol topish yoki yaratish
+    let virtualTableResult = await client.query(
+      `SELECT id FROM tables WHERE branch_id = $1 AND table_number = 0 LIMIT 1`,
+      [req.branchId]
+    );
+    let virtualTableId;
+    if (virtualTableResult.rows.length === 0) {
+      const newTable = await client.query(
+        `INSERT INTO tables (id, restaurant_id, branch_id, table_number, capacity)
+         VALUES ($1, $2, $3, 0, 999) RETURNING id`,
+        [uuidv4(), req.user.restaurant_id, req.branchId]
+      );
+      virtualTableId = newTable.rows[0].id;
+    } else {
+      virtualTableId = virtualTableResult.rows[0].id;
+    }
+
+    const totalAmount = enrichedItems.reduce((s, i) => s + i.price * i.quantity, 0);
+    const orderId = uuidv4();
+    const guestCnt = parseInt(guest_count) || 1;
+
+    // Buyurtma to'g'ridan-to'g'ri 'preparing' statusida yaratiladi
+    const result = await client.query(
+      `INSERT INTO orders (
+         id, restaurant_id, branch_id, table_id, waiter_id,
+         guest_count, items, is_from_qr, order_type, status, sent_to_kitchen_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, 'preparing', NOW())
+       RETURNING *`,
+      [
+        orderId, req.user.restaurant_id, req.branchId,
+        virtualTableId, req.user.user_id,
+        guestCnt, JSON.stringify(enrichedItems), order_type
+      ]
+    );
+
+    // Ombordan ayirish
+    for (const eItem of enrichedItems) {
+      const recipeRes = await client.query(
+        `SELECT r.inventory_item_id, r.quantity as recipe_qty, inv.quantity as stock_qty
+         FROM menu_item_recipes r
+         JOIN inventory_items inv ON inv.id = r.inventory_item_id
+         WHERE r.menu_item_id = $1 AND inv.branch_id = $2`,
+        [eItem.product_id, req.branchId]
+      );
+      for (const rLine of recipeRes.rows) {
+        const needed = parseFloat(rLine.recipe_qty) * eItem.quantity;
+        const currentStock = parseFloat(rLine.stock_qty);
+        await client.query(
+          `UPDATE inventory_items SET quantity = GREATEST(0, quantity - $1), updated_at = NOW()
+           WHERE id = $2 AND branch_id = $3`,
+          [needed, rLine.inventory_item_id, req.branchId]
+        );
+        await client.query(
+          `INSERT INTO inventory_logs (id, branch_id, inventory_item_id, change_amount, reason, order_id, before_quantity, after_quantity)
+           VALUES ($1,$2,$3,$4,'order',$5,$6,$7)`,
+          [uuidv4(), req.branchId, rLine.inventory_item_id, -needed, orderId, currentStock, Math.max(0, currentStock - needed)]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    const order = result.rows[0];
+
+    // WebSocket orqali oshxonaga yuborish
+    try {
+      const branchUsers = await getBranchUsers(req.branchId);
+      const itemTypes = [...new Set(enrichedItems.map(i => i.type).filter(Boolean))];
+      wsManager.sendToPreparers(branchUsers, itemTypes, 'new_order', {
+        message: order_type === 'takeaway' ? 'Saboy buyurtma!' : 'Dostavka buyurtma!',
+        order_id: orderId,
+        table_id: virtualTableId,
+        order_type,
+        items: enrichedItems,
+      });
+    } catch (_) {}
+
+    return created(res, order, 'Kassir buyurtmasi yaratildi');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  } finally {
+    client.release();
+  }
+};
+
+// ─── KASSIR BUYURTMALARINI OLISH ─────────────────────────────
+// GET /orders/cashier — faqat kassir buyurtmalari (preparing/ready_to_serve/payment_pending)
+const getCashierOrders = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT o.*, t.table_number FROM orders o
+       JOIN tables t ON t.id = o.table_id
+       WHERE o.branch_id = $1
+         AND o.order_type IN ('takeaway', 'delivery')
+         AND o.status IN ('preparing', 'ready_to_serve', 'payment_pending')
+       ORDER BY o.created_at DESC`,
+      [req.branchId]
+    );
+    return success(res, result.rows);
+  } catch (err) {
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
+module.exports = { getOrders, createOrder, updateOrder, sendToKitchen, completeOrder, prepareItem, cancelOrder, createCashierOrder, getCashierOrders };
