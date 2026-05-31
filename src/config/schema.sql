@@ -136,6 +136,9 @@ CREATE TABLE reservations (
 -- ============================================================
 -- BUYURTMALAR
 -- ============================================================
+-- order_type: table (oddiy stol), takeaway (saboy), delivery (dostavka)
+CREATE TYPE order_type_enum AS ENUM ('table', 'takeaway', 'delivery');
+
 CREATE TABLE orders (
   id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   restaurant_id       UUID NOT NULL REFERENCES restaurants(id),
@@ -145,6 +148,7 @@ CREATE TABLE orders (
   guest_count         INTEGER NOT NULL DEFAULT 1,
   status              order_status DEFAULT 'pending',
   is_from_qr          BOOLEAN DEFAULT FALSE,
+  order_type          order_type_enum NOT NULL DEFAULT 'table',
   items               JSONB NOT NULL DEFAULT '[]',
   sent_to_kitchen_at  TIMESTAMP,
   paid_at             TIMESTAMP,
@@ -176,6 +180,7 @@ CREATE TABLE order_archive (
   total_amount    DECIMAL(12, 2) NOT NULL DEFAULT 0,
   payment_type    payment_type,
   is_from_qr      BOOLEAN DEFAULT FALSE,
+  order_type      order_type_enum NOT NULL DEFAULT 'table',
   service_started TIMESTAMP,
   service_ended   TIMESTAMP,
   created_at      TIMESTAMP DEFAULT NOW()
@@ -209,10 +214,16 @@ CREATE TABLE inventory_items (
   quantity      DECIMAL(15, 4) NOT NULL DEFAULT 0,  -- joriy miqdor
   min_quantity  DECIMAL(15, 4) DEFAULT 0,            -- ogohlantirish chegarasi
   image_url     TEXT,
+  cost_price    DECIMAL(15, 2),                      -- 1 birlik tannarxi (so'mda)
+  purchased_at  TIMESTAMP DEFAULT NOW(),             -- oxirgi sotib olingan sana
   created_at    TIMESTAMP DEFAULT NOW(),
   updated_at    TIMESTAMP DEFAULT NOW(),
   UNIQUE (branch_id, name)
 );
+
+-- Mavjud jadvalga ustunlar qo'shish (migration)
+-- ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS cost_price DECIMAL(15, 2);
+-- ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS purchased_at TIMESTAMP DEFAULT NOW();
 
 CREATE INDEX idx_inventory_branch ON inventory_items(branch_id);
 
