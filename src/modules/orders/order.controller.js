@@ -332,6 +332,18 @@ const completeOrder = async (req, res) => {
       [id, req.branchId]
     );
     if (result.rows.length === 0) return error(res, 'Buyurtma hali tayyor emas', 400);
+
+    // Kassirga real vaqtda xabar yuborish
+    try {
+      const branchUsers = await getBranchUsers(req.branchId);
+      const order = result.rows[0];
+      wsManager.sendToBranchRole(branchUsers, ['cashier', 'manager'], 'order_payment_pending', {
+        message: `${order.table_number || 'Buyurtma'}-stol to'lovga tayyor!`,
+        order_id: id,
+        table_number: order.table_number,
+      });
+    } catch (_) {}
+
     return success(res, result.rows[0], "Buyurtma yakunlandi, to'lov kutilmoqda");
   } catch (err) {
     return error(res, 'Server xatosi', 500);
