@@ -17,7 +17,7 @@ const processPayment = async (req, res) => {
        FROM orders o
        JOIN tables t ON t.id = o.table_id
        LEFT JOIN users u_w ON u_w.id = o.waiter_id
-       WHERE o.id = $1 AND o.branch_id = $2 AND o.status = 'payment_pending'`,
+       WHERE o.id = $1 AND o.branch_id = $2 AND o.status IN ('payment_pending', 'ready_to_serve')`,
       [orderId, req.branchId]
     );
     if (orderResult.rows.length === 0) {
