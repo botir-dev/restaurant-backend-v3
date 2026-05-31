@@ -1,95 +1,123 @@
 const pool = require('../../config/database');
 const { success, error } = require('../../utils/response.utils');
 
-/**
- * Filial sozlamalarini olish yoki avtomatik yaratish
- * GET /manager/settings
- */
+// ─── GET /manager/settings ─────────────────────────────────────
 const getSettings = async (req, res) => {
   try {
-    const result = await pool.query(
+    let result = await pool.query(
       `SELECT * FROM branch_settings WHERE branch_id = $1`,
       [req.branchId]
     );
 
     if (result.rows.length === 0) {
-      // Sozlamalar yo'q — default yaratib qaytarish
       const def = await pool.query(
-        `INSERT INTO branch_settings (branch_id, service_fee_percent, waiter_commission_percent)
-         VALUES ($1, 0, 0)
+        `INSERT INTO branch_settings (
+           branch_id, service_fee_percent, service_fee_enabled,
+           vat_percent, vat_enabled, waiter_commission_percent, role_commissions
+         ) VALUES ($1, 0, FALSE, 12, FALSE, 0, \'{}\')
          ON CONFLICT (branch_id) DO UPDATE SET branch_id = EXCLUDED.branch_id
          RETURNING *`,
         [req.branchId]
       );
       return success(res, def.rows[0], 'Filial sozlamalari');
     }
-
     return success(res, result.rows[0], 'Filial sozlamalari');
   } catch (err) {
+    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
 
-/**
- * Filial sozlamalarini yangilash
- * PUT /manager/settings
- * Body: { service_fee_percent: number, waiter_commission_percent: number }
- */
+// ─── PUT /manager/settings ─────────────────────────────────────
+// Body: { service_fee_percent, service_fee_enabled, vat_percent, vat_enabled,
+//         waiter_commission_percent, role_commissions }
 const updateSettings = async (req, res) => {
-  const { service_fee_percent, waiter_commission_percent } = req.body;
+  const {
+    service_fee_percent, service_fee_enabled,
+    vat_percent, vat_enabled,
+    waiter_commission_percent,
+    role_commissions,
+  } = req.body;
 
-  if (service_fee_percent === undefined && waiter_commission_percent === undefined) {
-    return error(res, 'Kamida bitta maydon talab qilinadi');
-  }
+  const sfp = service_fee_percent !== undefined ? parseFloat(service_fee_percent) : null;
+  const vp  = vat_percent          !== undefined ? parseFloat(vat_percent)         : null;
+  const wcp = waiter_commission_percent !== undefined ? parseFloat(waiter_commission_percent) : null;
 
-  const sfp = parseFloat(service_fee_percent);
-  const wcp = parseFloat(waiter_commission_percent);
+  if (sfp !== null && (isNaN(sfp) || sfp < 0 || sfp > 100))
+    return error(res, "Xizmat haqi 0-100% orasida bo\'lishi kerak");
+  if (vp  !== null && (isNaN(vp)  || vp  < 0 || vp  > 100))
+    return error(res, "QQS 0-100% orasida bo\'lishi kerak");
+  if (wcp !== null && (isNaN(wcp) || wcp < 0 || wcp > 100))
+    return error(res, "Komissiya 0-100% orasida bo\'lishi kerak");
 
-  if (service_fee_percent !== undefined && (isNaN(sfp) || sfp < 0 || sfp > 100)) {
-    return error(res, 'Xizmat haqi 0-100% orasida bo\'lishi kerak');
-  }
-  if (waiter_commission_percent !== undefined && (isNaN(wcp) || wcp < 0 || wcp > 100)) {
-    return error(res, 'Ofitsiant komissiyasi 0-100% orasida bo\'lishi kerak');
-  }
+  // role_commissions validation: { cashier: 5, cook: 3, ... }
+  if (role_commissions !== undefined && typeof role_commissions !== 'object')
+    return error(res, "role_commissions object bo\'lishi kerak");
 
   try {
     const result = await pool.query(
-      `INSERT INTO branch_settings (branch_id, service_fee_percent, waiter_commission_percent)
-       VALUES ($1, $2, $3)
+      `INSERT INTO branch_settings (
+         branch_id, service_fee_percent, service_fee_enabled,
+         vat_percent, vat_enabled, waiter_commission_percent, role_commissions
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (branch_id) DO UPDATE SET
-         service_fee_percent = COALESCE($2, branch_settings.service_fee_percent),
-         waiter_commission_percent = COALESCE($3, branch_settings.waiter_commission_percent),
-         updated_at = NOW()
+         service_fee_percent      = COALESCE($2, branch_settings.service_fee_percent),
+         service_fee_enabled      = COALESCE($3, branch_settings.service_fee_enabled),
+         vat_percent              = COALESCE($4, branch_settings.vat_percent),
+         vat_enabled              = COALESCE($5, branch_settings.vat_enabled),
+         waiter_commission_percent= COALESCE($6, branch_settings.waiter_commission_percent),
+         role_commissions         = COALESCE($7, branch_settings.role_commissions),
+         updated_at               = NOW()
        RETURNING *`,
       [
         req.branchId,
-        service_fee_percent !== undefined ? sfp : null,
-        waiter_commission_percent !== undefined ? wcp : null,
+        sfp,
+        service_fee_enabled !== undefined ? service_fee_enabled : null,
+        vp,
+        vat_enabled !== undefined ? vat_enabled : null,
+        wcp,
+        role_commissions !== undefined ? JSON.stringify(role_commissions) : null,
       ]
     );
-
     return success(res, result.rows[0], 'Sozlamalar yangilandi');
   } catch (err) {
+    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
 
-/**
- * Ofitsiantlar kunlik maoshi
- * GET /manager/waiter-earnings?date=2026-05-20
- */
+// ─── GET /manager/waiter-earnings ─────────────────────────────
 const getWaiterEarnings = async (req, res) => {
   const { date } = req.query;
   if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return error(res, "Sana YYYY-MM-DD formatida bo\'lishi kerak (masalan: 2026-05-29)");
+    return error(res, "Sana YYYY-MM-DD formatida bo\'lishi kerak");
   }
   const targetDate = date || new Date().toISOString().split('T')[0];
 
   try {
     const result = await pool.query(
       `SELECT
-         we.waiter_id,
-         u.full_name as waiter_name,
+         re.user_id,
+         u.full_name as user_name,
+         u.role,
+         re.date,
+         re.total_orders,
+         re.total_order_amount,
+         re.commission_percent,
+         re.earned_amount
+       FROM role_earnings re
+       JOIN users u ON u.id = re.user_id
+       WHERE re.branch_id = $1 AND re.date = $2
+       ORDER BY re.earned_amount DESC`,
+      [req.branchId, targetDate]
+    );
+
+    // Eski waiter_earnings ham qaytarilsin (backward compat)
+    const oldResult = await pool.query(
+      `SELECT
+         we.waiter_id as user_id,
+         u.full_name as user_name,
+         \'waiter\' as role,
          we.date,
          we.total_orders,
          we.total_order_amount,
@@ -102,8 +130,16 @@ const getWaiterEarnings = async (req, res) => {
       [req.branchId, targetDate]
     );
 
-    return success(res, result.rows, `${targetDate} kunlik maosh hisobi`);
+    // Merge — role_earnings ni prioritet qilamiz
+    const merged = [...result.rows];
+    const existingIds = new Set(result.rows.map(r => r.user_id));
+    for (const row of oldResult.rows) {
+      if (!existingIds.has(row.user_id)) merged.push(row);
+    }
+
+    return success(res, merged, `${targetDate} kunlik maosh hisobi`);
   } catch (err) {
+    console.error(err);
     return error(res, 'Server xatosi', 500);
   }
 };
