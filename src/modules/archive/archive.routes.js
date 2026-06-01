@@ -26,3 +26,20 @@ router.get('/reports/takeaway',            c.getTakeawayReport);
 router.get('/reports/last-30-extended',    c.getLast30DaysExtended);
 
 module.exports = router;
+// DEBUG - inventory logs ni tekshirish (ishlatilgandan keyin o'chiring)
+router.get('/debug/inv-logs', async (req, res) => {
+  const pool = require('../../config/database');
+  try {
+    const r = await pool.query(
+      `SELECT l.id, l.branch_id, l.change_amount, l.reason,
+              TO_CHAR(l.created_at,'YYYY-MM-DD HH24:MI') as created,
+              i.name
+       FROM inventory_logs l
+       JOIN inventory_items i ON i.id = l.inventory_item_id
+       WHERE l.branch_id = $1
+       ORDER BY l.created_at DESC LIMIT 20`,
+      [req.branchId]
+    );
+    res.json({ count: r.rowCount, rows: r.rows, branchId: req.branchId });
+  } catch(e) { res.json({ error: e.message }); }
+});
