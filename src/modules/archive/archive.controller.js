@@ -388,8 +388,8 @@ const getProductHistoryReport = async (req, res) => {
   try {
     // change_amount > 0: faqat omborga KIRUVCHI mahsulotlar (manual_add, adjustment)
     // reason = 'order' bo'lsa buyurtma uchun CHIQARISH - uni hisobga olmaymiz
-    // Faqat 'manual_add' reason - qo'lda qo'shilgan mahsulotlar
-    let where = `WHERE l.branch_id = $1 AND l.change_amount > 0 AND l.reason = 'manual_add'`;
+    // Barcha kiruvchi (musbat) loglar - manual_add va boshqa sabab bo'lsa ham
+    let where = `WHERE l.branch_id = $1 AND l.change_amount > 0`;
     const params = [req.branchId];
     let idx = 2;
     // ::date cast bilan timezone muammosidan qochamiz
@@ -468,7 +468,6 @@ const getExpenses30Report = async (req, res) => {
       JOIN inventory_items i ON i.id = l.inventory_item_id
       WHERE l.branch_id = $1
         AND l.change_amount > 0
-        AND l.reason = 'manual_add'
         AND l.created_at::date >= $2::date
         AND l.created_at::date <= $3::date
       GROUP BY i.name, i.unit, i.custom_unit, i.cost_price
