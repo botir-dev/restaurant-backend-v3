@@ -386,11 +386,15 @@ const getTopTablesReport = async (req, res) => {
 const getProductHistoryReport = async (req, res) => {
   const { from, to } = req.query;
   try {
-    let where = `WHERE l.branch_id = $1 AND l.change_amount > 0`;
+    // change_amount > 0: faqat omborga KIRUVCHI mahsulotlar (manual_add, adjustment)
+    // reason = 'order' bo'lsa buyurtma uchun CHIQARISH - uni hisobga olmaymiz
+    // Faqat 'manual_add' reason - qo'lda qo'shilgan mahsulotlar
+    let where = `WHERE l.branch_id = $1 AND l.change_amount > 0 AND l.reason = 'manual_add'`;
     const params = [req.branchId];
     let idx = 2;
-    if (from) { params.push(new Date(from).toISOString()); where += ` AND l.created_at >= $${idx++}`; }
-    if (to)   { params.push(new Date(to).toISOString());   where += ` AND l.created_at <= $${idx++}`; }
+    // ::date cast bilan timezone muammosidan qochamiz
+    if (from) { params.push(from); where += ` AND l.created_at::date >= $${idx++}::date`; }
+    if (to)   { params.push(to);   where += ` AND l.created_at::date <= $${idx++}::date`; }
 
     const rows = await pool.query(`
       SELECT
@@ -444,11 +448,14 @@ const getExpenses30Report = async (req, res) => {
 
   try {
     const branchId = req.branchId;
-    const now = new Date();
-    const to   = now.toISOString();
-    const from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    // DATE formatda ishlash - timezone muammosidan qochish
+    const nowDate  = new Date();
+    const toDate   = nowDate.toISOString().split('T')[0];
+    const fromDate = new Date(nowDate - 30*24*60*60*1000).toISOString().split('T')[0];
 
     // ── 1. Ombor harajatlari (kiruvchi mahsulotlar) ───────────
+    // reason = 'manual_add' -> faqat qo'lda qo'shilganlar
+    // change_amount > 0 -> musbat miqdor
     const inventoryRows = await pool.query(`
       SELECT
         i.name                                              AS product_name,
@@ -459,11 +466,14 @@ const getExpenses30Report = async (req, res) => {
         ROUND(SUM(l.change_amount * COALESCE(i.cost_price,0)), 2) AS total_cost
       FROM inventory_logs l
       JOIN inventory_items i ON i.id = l.inventory_item_id
-      WHERE l.branch_id = $1 AND l.change_amount > 0
-        AND l.created_at >= $2 AND l.created_at <= $3
+      WHERE l.branch_id = $1
+        AND l.change_amount > 0
+        AND l.reason = 'manual_add'
+        AND l.created_at::date >= $2::date
+        AND l.created_at::date <= $3::date
       GROUP BY i.name, i.unit, i.custom_unit, i.cost_price
       ORDER BY total_cost DESC
-    `, [branchId, from, to]);
+    `, [branchId, fromDate, toDate]);
 
     const totalInventory = inventoryRows.rows.reduce((s, r) => s + parseFloat(r.total_cost || 0), 0);
 
