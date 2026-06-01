@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
 
 const authRoutes      = require('./modules/auth/auth.routes');
 const adminRoutes     = require('./modules/admin/admin.routes');
@@ -20,7 +21,6 @@ const publicRoutes    = require('./modules/public/public.routes');
 const managerRoutes   = require('./modules/manager/manager.routes');
 const inventoryRoutes = require('./modules/inventory/inventory.routes');
 const menuRoutes      = require('./modules/menu/menu.routes');
-// migration.routes — PRODUCTION DA O'CHIRILDI (xavfsizlik)
 
 const app = express();
 
@@ -39,7 +39,6 @@ app.use(helmet({
 }));
 
 // ─── CORS: faqat ruxsat etilgan domenlar ──────────────────────
-// Production da ALLOWED_ORIGINS env majburiy
 if (!process.env.ALLOWED_ORIGINS && process.env.NODE_ENV === 'production') {
   console.error('[KRITIK] ALLOWED_ORIGINS env o\'rnatilmagan! Server to\'xtatilmoqda.');
   process.exit(1);
@@ -60,13 +59,16 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// ─── LOGGING: WS token URL da ko'rinmasin ─────────────────────
+// ─── LOGGING ──────────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
   morgan.token('safe-url', (req) => req.url.replace(/token=[^&\s]*/g, 'token=***'));
   app.use(morgan(':method :safe-url :status :res[content-length] - :response-time ms'));
 } else {
   app.use(morgan('dev'));
 }
+
+// ─── COOKIE PARSER ────────────────────────────────────────────
+app.use(cookieParser());
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
@@ -81,7 +83,7 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
-// ─── LOGIN BRUTE FORCE LIMITI (alohida) ───────────────────────
+// ─── LOGIN BRUTE FORCE LIMITI ─────────────────────────────────
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -92,7 +94,7 @@ const loginLimiter = rateLimit({
 });
 app.use('/auth/login', loginLimiter);
 
-// ─── QR PUBLIC BUYURTMA LIMITI (IP bo'yicha) ──────────────────
+// ─── QR PUBLIC BUYURTMA LIMITI ────────────────────────────────
 const publicOrderLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
