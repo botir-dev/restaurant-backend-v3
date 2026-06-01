@@ -1,5 +1,6 @@
 const pool = require('../config/database');
 const { checkAllBranchInventory } = require('./inventory.alerts');
+const { sendDailyReport } = require('./daily.report');
 
 /**
  * Muddati o'tgan bronlarni avtomatik bekor qiladi.
@@ -54,10 +55,22 @@ const startCronJobs = () => {
   // Har 6 soatda inventory ogohlantirishlarni tekshirish
   setInterval(checkAllBranchInventory, 6 * 60 * 60 * 1000);
 
+  // Har daqiqa soat 23:59 ni tekshirish (Toshkent vaqti)
+  setInterval(() => {
+    const now = new Date();
+    // UTC+5 Toshkent vaqtiga o'tkazish
+    const tashkent = new Date(now.getTime() + 5 * 60 * 60 * 1000);
+    const h = tashkent.getUTCHours();
+    const m = tashkent.getUTCMinutes();
+    if (h === 23 && m === 59) {
+      console.log('[Cron] 23:59 — kunlik hisobot yuborilmoqda...');
+      sendDailyReport();
+    }
+  }, 60 * 1000);
+
   // Ishga tushganda bir marta darhol bajarish
   cancelExpiredReservations();
   cleanExpiredRefreshTokens();
-  // 10 soniyadan keyin inventory tekshirish (DB tayyor bo'lishi uchun)
   setTimeout(checkAllBranchInventory, 10_000);
 
   console.log('[Cron] Cron jobs ishga tushirildi');
