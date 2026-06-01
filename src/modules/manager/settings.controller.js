@@ -59,7 +59,7 @@ const updateSettings = async (req, res) => {
     const result = await pool.query(
       `INSERT INTO branch_settings (
          branch_id, service_fee_percent, service_fee_enabled,
-         vat_percent, vat_enabled, waiter_commission_percent, role_commissions
+         vat_percent, vat_enabled, waiter_commission_percent, role_commissions, telegram_chat_id
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (branch_id) DO UPDATE SET
          service_fee_percent      = COALESCE($2, branch_settings.service_fee_percent),
@@ -68,6 +68,7 @@ const updateSettings = async (req, res) => {
          vat_enabled              = COALESCE($5, branch_settings.vat_enabled),
          waiter_commission_percent= COALESCE($6, branch_settings.waiter_commission_percent),
          role_commissions         = COALESCE($7, branch_settings.role_commissions),
+         telegram_chat_id         = COALESCE($8, branch_settings.telegram_chat_id),
          updated_at               = NOW()
        RETURNING *`,
       [
@@ -78,6 +79,7 @@ const updateSettings = async (req, res) => {
         vat_enabled !== undefined ? vat_enabled : null,
         wcp,
         role_commissions !== undefined ? JSON.stringify(role_commissions) : null,
+        telegram_chat_id !== undefined ? String(telegram_chat_id) : null,
       ]
     );
     return success(res, result.rows[0], 'Sozlamalar yangilandi');
