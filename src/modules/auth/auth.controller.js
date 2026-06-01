@@ -11,10 +11,14 @@ const parsePermissions = (val) => {
 };
 
 // Cookie options — bir joyda boshqarish uchun
+// SameSite=None + Secure — cross-site so'rovlar uchun majburiy.
+// Frontend (restaurant.botirdev.uz) va backend (onrender.com) turli
+// domenlar bo'lgani uchun SameSite=Strict bilan cookie HECH QACHON
+// yuborilmaydi → refresh doim 401 beradi!
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict',
+  secure: true,        // SameSite=None uchun Secure majburiy (HTTPS kerak)
+  sameSite: 'none',    // cross-site cookie — turli domenlar orasida ishlaydi
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 kun (ms)
   path: '/',
 };
