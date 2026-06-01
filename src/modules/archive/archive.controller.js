@@ -548,20 +548,20 @@ const getExpenses30Report = async (req, res) => {
 
     // ── 2. Hodimlar maoshi ────────────────────────────────────
     // a) commission (foiz) asosida maosh
-    // waiter_earnings jadvali mavjud bo'lmasa xato bermaydi
+    // waiter_earnings (waiter rol) + role_earnings (boshqa rollar) ikkalasidan olamiz
     let commissionStaff = { rows: [] };
     try {
-      commissionStaff = await pool.query(`
+      // waiter_earnings dan waiterlar
+      const waiterRows = await pool.query(`
         SELECT
           u.full_name,
           u.role,
           u.use_commission,
           u.monthly_salary,
-          SUM(COALESCE(we.earned_amount, 0)) AS earned
+          COALESCE(SUM(we.earned_amount), 0) AS earned
         FROM users u
         LEFT JOIN waiter_earnings we
           ON we.waiter_id = u.id
-         AND we.branch_id = u.branch_id
          AND we.date >= $2::date
          AND we.date <= $3::date
         WHERE u.branch_id = $1
@@ -571,8 +571,42 @@ const getExpenses30Report = async (req, res) => {
         GROUP BY u.id, u.full_name, u.role, u.use_commission, u.monthly_salary
         ORDER BY u.full_name
       `, [branchId, fromDate, toDate]);
+
+      // role_earnings dan boshqa foizli hodimlar (cashier, cook, etc.)
+      const roleRows = await pool.query(`
+        SELECT
+          u.full_name,
+          u.role,
+          u.use_commission,
+          u.monthly_salary,
+          COALESCE(SUM(re.earned_amount), 0) AS earned
+        FROM users u
+        LEFT JOIN role_earnings re
+          ON re.user_id = u.id
+         AND re.date >= $2::date
+         AND re.date <= $3::date
+        WHERE u.branch_id = $1
+          AND u.is_active = TRUE
+          AND u.use_commission = TRUE
+          AND u.role NOT IN ('super_admin', 'waiter')
+        GROUP BY u.id, u.full_name, u.role, u.use_commission, u.monthly_salary
+        ORDER BY u.full_name
+      `, [branchId, fromDate, toDate]);
+
+      // Barcha foizli hodimlar - waiter + boshqalar (takrorlanmaslik uchun)
+      const allIds = new Set(waiterRows.rows.map(r => r.full_name));
+      const mergedRows = [...waiterRows.rows];
+      for (const r of roleRows.rows) {
+        if (!allIds.has(r.full_name)) mergedRows.push(r);
+        else {
+          // Ikki jadvalda bo'lsa - earned larni qo'shamiz
+          const existing = mergedRows.find(x => x.full_name === r.full_name);
+          if (existing) existing.earned = parseFloat(existing.earned || 0) + parseFloat(r.earned || 0);
+        }
+      }
+      commissionStaff = { rows: mergedRows };
     } catch (e) {
-      console.warn('waiter_earnings query error (jadval yo\'q bo\'lishi mumkin):', e.message);
+      console.warn('commission staff query error:', e.message);
     }
 
     // b) Oylik maosh birikadirilganlar
