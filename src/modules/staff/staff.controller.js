@@ -21,7 +21,7 @@ const getStaff = async (req, res) => {
       `SELECT id, full_name, username, phone, role, extra_permissions, is_active, monthly_salary, use_commission, created_at
        FROM users
        WHERE branch_id = $1 AND restaurant_id = $2
-         AND role != 'waiter' AND role != 'super_admin' AND is_active = TRUE
+         AND role != 'super_admin' AND is_active = TRUE
        ORDER BY
          CASE WHEN role = 'manager' THEN 0 ELSE 1 END,
          created_at DESC`,
