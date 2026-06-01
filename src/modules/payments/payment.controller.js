@@ -83,8 +83,10 @@ const processPayment = async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
 
-    // Waiter earnings (ofitsiant)
-    if (order.waiter_id && waiterCommissionPercent > 0) {
+    // Waiter earnings - faqat stol (table) buyurtmalarida hisoblash
+    // Saboy/dostavka buyurtmalarida ofitsiant ishtirok etmaydi
+    const isTableOrder = !['takeaway', 'delivery'].includes(order.order_type);
+    if (order.waiter_id && waiterCommissionPercent > 0 && isTableOrder) {
       await pool.query(
         `INSERT INTO waiter_earnings (waiter_id, branch_id, date, total_orders, total_order_amount, commission_percent, earned_amount)
          VALUES ($1, $2, $3, 1, $4, $5, $6)
@@ -98,15 +100,14 @@ const processPayment = async (req, res) => {
       );
     }
 
-    // Role earnings — barcha rollar uchun (cashier, cook, etc.)
-    // Kassir (to'lov qilgan odam) uchun role_commission
+    // Role earnings — faqat stol buyurtmalarida (saboy/dostavkada maosh yo'q)
     const cashierRole = req.user.role;
     const cashierUserRes = await pool.query(
       `SELECT use_commission FROM users WHERE id = $1`,
       [req.user.user_id]
     );
     const cashierUseCommission = cashierUserRes.rows[0]?.use_commission === true;
-    if (cashierUseCommission && roleCommissions[cashierRole] > 0) {
+    if (cashierUseCommission && roleCommissions[cashierRole] > 0 && isTableOrder) {
       const cashierCommPercent = parseFloat(roleCommissions[cashierRole]);
       const cashierEarned = Math.round((totalAmount * cashierCommPercent) / 100);
       await pool.query(
