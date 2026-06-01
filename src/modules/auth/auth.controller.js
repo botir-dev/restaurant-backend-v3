@@ -10,13 +10,21 @@ const parsePermissions = (val) => {
   return val.replace(/^{|}$/g, '').split(',').filter(Boolean);
 };
 
+// Cookie options — bir joyda boshqarish uchun
+const REFRESH_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict',
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 kun (ms)
+  path: '/',
+};
+
 // POST /auth/login
 const login = async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return error(res, 'Username va parol talab qilinadi');
   }
-  // Parol minimal uzunlik tekshiruvi
   if (typeof password !== 'string' || password.length > 128) {
     return error(res, "Parol noto'g'ri formatda");
   }
@@ -26,9 +34,8 @@ const login = async (req, res) => {
       `SELECT * FROM users WHERE username = $1 AND is_active = TRUE`,
       [username]
     );
-    // Foydalanuvchi topilmasa ham bir xil xabar — username enumeration oldini olish
     if (result.rows.length === 0) {
-      await bcrypt.hash('dummy', 12); // timing attack oldini olish
+      await bcrypt.hash('dummy', 12);
       return error(res, "Username yoki parol noto'g'ri", 401);
     }
 
@@ -56,14 +63,18 @@ const login = async (req, res) => {
       [uuidv4(), user.id, refreshToken, expiresAt]
     );
 
+    // refresh_token — HttpOnly cookie
+    res.cookie('refresh_token', refreshToken, REFRESH_COOKIE_OPTIONS);
+
+    // access_token — response body (frontend memory ga saqlaydi)
     return success(res, {
       access_token: accessToken,
-      refresh_token: refreshToken,
       role: user.role,
       extra_permissions: parsePermissions(user.extra_permissions),
       branch_id: user.branch_id,
       restaurant_id: user.restaurant_id,
       full_name: user.full_name,
+      // refresh_token body dan olib tashlandi
     }, 'Muvaffaqiyatli kirildi');
 
   } catch (err) {
@@ -73,28 +84,30 @@ const login = async (req, res) => {
 
 // POST /auth/refresh
 const refresh = async (req, res) => {
-  const { refresh_token } = req.body;
-  if (!refresh_token) return error(res, 'Refresh token talab qilinadi');
+  // Cookie dan olish, body dan emas
+  const refreshToken = req.cookies?.refresh_token || req.body?.refresh_token;
+  if (!refreshToken) return error(res, 'Refresh token talab qilinadi', 401);
 
   try {
-    const payload = verifyRefreshToken(refresh_token);
+    const payload = verifyRefreshToken(refreshToken);
 
     const tokenResult = await pool.query(
       `SELECT * FROM refresh_tokens WHERE token = $1 AND expires_at > NOW()`,
-      [refresh_token]
+      [refreshToken]
     );
     if (tokenResult.rows.length === 0) {
+      res.clearCookie('refresh_token', { path: '/' });
       return error(res, "Token noto'g'ri yoki muddati o'tgan", 401);
     }
 
-    // Token rotatsiyasi — eski o'chir, yangi yoz
-    await pool.query(`DELETE FROM refresh_tokens WHERE token = $1`, [refresh_token]);
+    await pool.query(`DELETE FROM refresh_tokens WHERE token = $1`, [refreshToken]);
 
     const userResult = await pool.query(
       `SELECT * FROM users WHERE id = $1 AND is_active = TRUE`,
       [payload.user_id]
     );
     if (userResult.rows.length === 0) {
+      res.clearCookie('refresh_token', { path: '/' });
       return error(res, 'Foydalanuvchi topilmadi', 401);
     }
 
@@ -117,25 +130,35 @@ const refresh = async (req, res) => {
       [uuidv4(), user.id, newRefreshToken, expiresAt]
     );
 
-    return success(res, { access_token: newAccessToken, refresh_token: newRefreshToken }, 'Token yangilandi');
+    // Yangi refresh_token — cookie ga
+    res.cookie('refresh_token', newRefreshToken, REFRESH_COOKIE_OPTIONS);
+
+    return success(res, {
+      access_token: newAccessToken,
+      // refresh_token body dan olib tashlandi
+    }, 'Token yangilandi');
+
   } catch (err) {
+    res.clearCookie('refresh_token', { path: '/' });
     return error(res, "Token noto'g'ri yoki muddati o'tgan", 401);
   }
 };
 
 // POST /auth/logout
 const logout = async (req, res) => {
-  const { refresh_token } = req.body;
-  if (refresh_token) {
-    await pool.query(`DELETE FROM refresh_tokens WHERE token = $1`, [refresh_token]);
+  const refreshToken = req.cookies?.refresh_token || req.body?.refresh_token;
+  if (refreshToken) {
+    await pool.query(`DELETE FROM refresh_tokens WHERE token = $1`, [refreshToken]);
   }
+  res.clearCookie('refresh_token', { path: '/' });
   return success(res, {}, 'Chiqildi');
 };
 
-// POST /auth/logout-all  — barcha qurilmalardan chiqish
+// POST /auth/logout-all
 const logoutAll = async (req, res) => {
   try {
     await pool.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [req.user.user_id]);
+    res.clearCookie('refresh_token', { path: '/' });
     return success(res, {}, "Barcha qurilmalardan chiqildi");
   } catch (err) {
     return error(res, 'Server xatosi', 500);
@@ -148,7 +171,6 @@ const changePassword = async (req, res) => {
   if (!old_password || !new_password) {
     return error(res, 'Eski va yangi parol talab qilinadi');
   }
-  // Kuchli parol tekshiruvi
   if (new_password.length < 8) {
     return error(res, 'Yangi parol kamida 8 ta belgidan iborat bo\'lishi kerak');
   }
@@ -172,8 +194,8 @@ const changePassword = async (req, res) => {
       [newHash, req.user.user_id]
     );
 
-    // Barcha refresh tokenlarni o'chirish (boshqa qurilmalardan chiqarish)
     await pool.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [req.user.user_id]);
+    res.clearCookie('refresh_token', { path: '/' });
 
     return success(res, {}, "Parol muvaffaqiyatli o'zgartirildi");
   } catch (err) {
