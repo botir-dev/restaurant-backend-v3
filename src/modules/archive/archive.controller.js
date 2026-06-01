@@ -479,26 +479,32 @@ const getExpenses30Report = async (req, res) => {
 
     // ── 2. Hodimlar maoshi ────────────────────────────────────
     // a) commission (foiz) asosida maosh
-    const commissionStaff = await pool.query(`
-      SELECT
-        u.full_name,
-        u.role,
-        u.use_commission,
-        u.monthly_salary,
-        SUM(COALESCE(we.earned_amount, 0)) AS earned
-      FROM users u
-      LEFT JOIN waiter_earnings we
-        ON we.waiter_id = u.id
-       AND we.branch_id = u.branch_id
-       AND we.date >= $2::date
-       AND we.date <= $3::date
-      WHERE u.branch_id = $1
-        AND u.is_active = TRUE
-        AND u.use_commission = TRUE
-        AND u.role NOT IN ('super_admin')
-      GROUP BY u.id, u.full_name, u.role, u.use_commission, u.monthly_salary
-      ORDER BY u.full_name
-    `, [branchId, from, to]);
+    // waiter_earnings jadvali mavjud bo'lmasa xato bermaydi
+    let commissionStaff = { rows: [] };
+    try {
+      commissionStaff = await pool.query(`
+        SELECT
+          u.full_name,
+          u.role,
+          u.use_commission,
+          u.monthly_salary,
+          SUM(COALESCE(we.earned_amount, 0)) AS earned
+        FROM users u
+        LEFT JOIN waiter_earnings we
+          ON we.waiter_id = u.id
+         AND we.branch_id = u.branch_id
+         AND we.date >= $2::date
+         AND we.date <= $3::date
+        WHERE u.branch_id = $1
+          AND u.is_active = TRUE
+          AND u.use_commission = TRUE
+          AND u.role NOT IN ('super_admin')
+        GROUP BY u.id, u.full_name, u.role, u.use_commission, u.monthly_salary
+        ORDER BY u.full_name
+      `, [branchId, fromDate, toDate]);
+    } catch (e) {
+      console.warn('waiter_earnings query error (jadval yo\'q bo\'lishi mumkin):', e.message);
+    }
 
     // b) Oylik maosh birikadirilganlar
     const monthlySalaryStaff = await pool.query(`
@@ -529,8 +535,9 @@ const getExpenses30Report = async (req, res) => {
         SUM(COALESCE(vat_amount, 0))                               AS total_vat
       FROM order_archive
       WHERE branch_id = $1
-        AND created_at >= $2 AND created_at <= $3
-    `, [branchId, from, to]);
+        AND created_at::date >= $2::date
+        AND created_at::date <= $3::date
+    `, [branchId, fromDate, toDate]);
 
     const ordersData = ordersRes.rows[0];
     const totalRevenue = parseFloat(ordersData.total_revenue || 0);
@@ -544,7 +551,7 @@ const getExpenses30Report = async (req, res) => {
     const totalExpenses  = vatAmount + totalUtilities + totalSalary + totalInventory;
 
     return success(res, {
-      period: { from, to },
+      period: { from: fromDate, to: toDate },
       inventory: { rows: inventoryRows.rows, total: totalInventory },
       salary: {
         commission_staff: commissionStaff.rows,
