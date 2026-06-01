@@ -37,6 +37,7 @@ const updateSettings = async (req, res) => {
     vat_percent, vat_enabled,
     waiter_commission_percent,
     role_commissions,
+    telegram_chat_id,
   } = req.body;
 
   const sfp = service_fee_percent !== undefined ? parseFloat(service_fee_percent) : null;
@@ -59,7 +60,7 @@ const updateSettings = async (req, res) => {
       `INSERT INTO branch_settings (
          branch_id, service_fee_percent, service_fee_enabled,
          vat_percent, vat_enabled, waiter_commission_percent, role_commissions
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (branch_id) DO UPDATE SET
          service_fee_percent      = COALESCE($2, branch_settings.service_fee_percent),
          service_fee_enabled      = COALESCE($3, branch_settings.service_fee_enabled),
