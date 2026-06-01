@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const { checkAllBranchInventory } = require('./inventory.alerts');
 
 /**
  * Muddati o'tgan bronlarni avtomatik bekor qiladi.
@@ -50,9 +51,14 @@ const startCronJobs = () => {
   // Har 24 soatda eskirgan tokenlarni tozalash
   setInterval(cleanExpiredRefreshTokens, 24 * 60 * 60 * 1000);
 
+  // Har 6 soatda inventory ogohlantirishlarni tekshirish
+  setInterval(checkAllBranchInventory, 6 * 60 * 60 * 1000);
+
   // Ishga tushganda bir marta darhol bajarish
   cancelExpiredReservations();
   cleanExpiredRefreshTokens();
+  // 10 soniyadan keyin inventory tekshirish (DB tayyor bo'lishi uchun)
+  setTimeout(checkAllBranchInventory, 10_000);
 
   console.log('[Cron] Cron jobs ishga tushirildi');
 };
