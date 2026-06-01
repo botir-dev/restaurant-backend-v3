@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const pool = require('../../config/database');
 const { success, created, error } = require('../../utils/response.utils');
 const wsManager = require('../ws/ws.manager');
+const { checkInventoryAlerts } = require('../../utils/inventory.alerts');
 
 const getBranchUsers = async (branchId) => {
   const result = await pool.query(
@@ -149,6 +150,7 @@ const createOrder = async (req, res) => {
     // Har bir buyurtma mahsuloti uchun menu_items retseptini tekshiramiz
     // (product_id = menu_items.id bo'lishi mumkin)
     const currentBranchId = req.branchId || req.user.branch_id;
+    const affectedInventoryIds = [];
     for (const eItem of enrichedItems) {
       const recipeRes = await client.query(
         `SELECT r.inventory_item_id, r.quantity as recipe_qty,
@@ -184,11 +186,19 @@ const createOrder = async (req, res) => {
             currentStock, Math.max(0, afterStock)
           ]
         );
+        if (!affectedInventoryIds.includes(rLine.inventory_item_id)) {
+          affectedInventoryIds.push(rLine.inventory_item_id);
+        }
       }
     }
     // ────────────────────────────────────────────────────────────
 
     await client.query('COMMIT');
+
+    // Inventory alert tekshirish (fon rejimida)
+    if (affectedInventoryIds.length > 0) {
+      checkInventoryAlerts(currentBranchId, affectedInventoryIds).catch(() => {});
+    }
 
     const order = result.rows[0];
     if (is_from_qr) {
@@ -513,6 +523,7 @@ const createCashierOrder = async (req, res) => {
     );
 
     // Ombordan ayirish
+    const cashierAffectedIds = [];
     for (const eItem of enrichedItems) {
       const recipeRes = await client.query(
         `SELECT r.inventory_item_id, r.quantity as recipe_qty, inv.quantity as stock_qty
@@ -534,10 +545,18 @@ const createCashierOrder = async (req, res) => {
            VALUES ($1,$2,$3,$4,'order',$5,$6,$7)`,
           [uuidv4(), req.branchId, rLine.inventory_item_id, -needed, orderId, currentStock, Math.max(0, currentStock - needed)]
         );
+        if (!cashierAffectedIds.includes(rLine.inventory_item_id)) {
+          cashierAffectedIds.push(rLine.inventory_item_id);
+        }
       }
     }
 
     await client.query('COMMIT');
+
+    // Inventory alert tekshirish (fon rejimida)
+    if (cashierAffectedIds.length > 0) {
+      checkInventoryAlerts(req.branchId, cashierAffectedIds).catch(() => {});
+    }
 
     const order = result.rows[0];
 
