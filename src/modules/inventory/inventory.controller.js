@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../../config/database');
 const { success, created, error, paginate } = require('../../utils/response.utils');
+const { checkInventoryAlerts } = require('../../utils/inventory.alerts');
 
 const VALID_UNITS = ['kg', 'L', 'dona', 'g', 'ml', 'custom'];
 
@@ -178,6 +179,10 @@ const addStock = async (req, res) => {
     const updated = await pool.query(
       `SELECT * FROM inventory_items WHERE id = $1`, [id]
     );
+
+    // Min quantity tekshirish (fon rejimida)
+    checkInventoryAlerts(req.branchId, [id]).catch(() => {});
+
     return success(res, updated.rows[0], 'Miqdor qo\'shildi');
   } catch (err) {
     await client.query('ROLLBACK');
