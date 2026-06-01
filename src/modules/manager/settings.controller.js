@@ -127,7 +127,7 @@ const getWaiterEarnings = async (req, res) => {
          we.commission_percent,
          we.earned_amount
        FROM waiter_earnings we
-       JOIN users u ON u.id = we.waiter_id
+       JOIN users u ON u.id = we.waiter_id AND u.branch_id = $1
        WHERE we.branch_id = $1 AND we.date = $2
        ORDER BY we.earned_amount DESC`,
       [req.branchId, targetDate]
