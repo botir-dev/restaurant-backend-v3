@@ -396,16 +396,36 @@ const getProductHistoryReport = async (req, res) => {
     if (from) { params.push(from); where += ` AND l.created_at::date >= $${idx++}::date`; }
     if (to)   { params.push(to);   where += ` AND l.created_at::date <= $${idx++}::date`; }
 
-    // inventory_logs da musbat yozuv yo'q bo'lsa inventory_items.purchased_at dan olamiz
+    // Kelgan miqdor = joriy miqdor + davr ichida sarflangan miqdor
     const rows = await pool.query(`
       SELECT
         i.id,
         i.name                                     AS product_name,
         i.unit,
         i.custom_unit,
-        i.quantity                                 AS quantity,
+        ROUND(
+          i.quantity + COALESCE(
+            (SELECT ABS(SUM(l2.change_amount))
+             FROM inventory_logs l2
+             WHERE l2.inventory_item_id = i.id
+               AND l2.change_amount < 0
+               AND l2.created_at::date >= $2::date
+               AND l2.created_at::date <= $3::date),
+            0
+          ), 4
+        )                                          AS quantity,
         i.cost_price                               AS unit_cost,
-        ROUND(i.quantity * COALESCE(i.cost_price, 0), 2) AS total_cost,
+        ROUND(
+          (i.quantity + COALESCE(
+            (SELECT ABS(SUM(l2.change_amount))
+             FROM inventory_logs l2
+             WHERE l2.inventory_item_id = i.id
+               AND l2.change_amount < 0
+               AND l2.created_at::date >= $2::date
+               AND l2.created_at::date <= $3::date),
+            0
+          )) * COALESCE(i.cost_price, 0), 2
+        )                                          AS total_cost,
         'purchased'                                AS reason,
         TO_CHAR(i.purchased_at, 'YYYY-MM-DD')      AS date,
         TO_CHAR(i.purchased_at, 'HH24:MI')         AS time,
@@ -413,10 +433,10 @@ const getProductHistoryReport = async (req, res) => {
       FROM inventory_items i
       WHERE i.branch_id = $1
         AND i.purchased_at IS NOT NULL
-        ${from ? `AND i.purchased_at::date >= '${from}'::date` : ''}
-        ${to   ? `AND i.purchased_at::date <= '${to}'::date`   : ''}
+        AND i.cost_price IS NOT NULL
+        AND i.cost_price > 0
       ORDER BY i.purchased_at DESC
-    `, [params[0]]);
+    `, params);
 
     // Mahsulot bo'yicha umumiy xulosa
     const summary = await pool.query(`
@@ -425,15 +445,35 @@ const getProductHistoryReport = async (req, res) => {
         i.unit,
         i.custom_unit,
         i.cost_price                                       AS unit_cost,
-        i.quantity                                         AS total_quantity,
-        ROUND(i.quantity * COALESCE(i.cost_price, 0), 2)  AS total_cost
+        ROUND(
+          i.quantity + COALESCE(
+            (SELECT ABS(SUM(l2.change_amount))
+             FROM inventory_logs l2
+             WHERE l2.inventory_item_id = i.id
+               AND l2.change_amount < 0
+               AND l2.created_at::date >= $2::date
+               AND l2.created_at::date <= $3::date),
+            0
+          ), 4
+        )                                                  AS total_quantity,
+        ROUND(
+          (i.quantity + COALESCE(
+            (SELECT ABS(SUM(l2.change_amount))
+             FROM inventory_logs l2
+             WHERE l2.inventory_item_id = i.id
+               AND l2.change_amount < 0
+               AND l2.created_at::date >= $2::date
+               AND l2.created_at::date <= $3::date),
+            0
+          )) * COALESCE(i.cost_price, 0), 2
+        )                                                  AS total_cost
       FROM inventory_items i
       WHERE i.branch_id = $1
         AND i.purchased_at IS NOT NULL
-        ${from ? `AND i.purchased_at::date >= '${from}'::date` : ''}
-        ${to   ? `AND i.purchased_at::date <= '${to}'::date`   : ''}
+        AND i.cost_price IS NOT NULL
+        AND i.cost_price > 0
       ORDER BY total_cost DESC
-    `, [params[0]]);
+    `, params);
 
     const grandTotal = summary.rows.reduce((s, r) => s + parseFloat(r.total_cost || 0), 0);
 
@@ -460,36 +500,41 @@ const getExpenses30Report = async (req, res) => {
     // ── 1. Ombor harajatlari (kiruvchi mahsulotlar) ───────────
     // reason = 'manual_add' -> faqat qo'lda qo'shilganlar
     // change_amount > 0 -> musbat miqdor
-    // inventory_logs da manual_add bo'lmasligi mumkin
-    // Shuning uchun ikkala manbadan olamiz:
-    // 1) inventory_logs da change_amount > 0 bo'lsa (manual_add)
-    // 2) yoki inventory_items.purchased_at oxirgi 30 kunda bo'lsa
+    // inventory_logs da faqat manfiy (order) loglar bor
+    // Kirgan miqdor = joriy miqdor + o'sha davrdagi barcha chiqimlar (ABS sum)
+    // purchased_at shu davr ichida bo'lgan mahsulotlar uchun hisoblaymiz
     const inventoryRows = await pool.query(`
       SELECT
-        i.name                                              AS product_name,
+        i.name                                                        AS product_name,
         i.unit,
         i.custom_unit,
-        i.cost_price                                        AS unit_cost,
-        COALESCE(
-          (SELECT SUM(l2.change_amount)
-           FROM inventory_logs l2
-           WHERE l2.inventory_item_id = i.id
-             AND l2.change_amount > 0
-             AND l2.created_at::date >= $2::date
-             AND l2.created_at::date <= $3::date),
-          0
-        )                                                   AS total_quantity,
+        i.cost_price                                                  AS unit_cost,
+        -- Joriy miqdor + shu davrdagi barcha chiqimlar = kelgan miqdor
         ROUND(
-          COALESCE(
-            (SELECT SUM(l2.change_amount)
+          i.quantity + COALESCE(
+            (SELECT ABS(SUM(l2.change_amount))
              FROM inventory_logs l2
              WHERE l2.inventory_item_id = i.id
-               AND l2.change_amount > 0
+               AND l2.change_amount < 0
                AND l2.created_at::date >= $2::date
                AND l2.created_at::date <= $3::date),
             0
+          ), 4
+        )                                                             AS total_quantity,
+        -- Kelgan miqdor * birlik narxi = umumiy narx
+        ROUND(
+          (
+            i.quantity + COALESCE(
+              (SELECT ABS(SUM(l2.change_amount))
+               FROM inventory_logs l2
+               WHERE l2.inventory_item_id = i.id
+                 AND l2.change_amount < 0
+                 AND l2.created_at::date >= $2::date
+                 AND l2.created_at::date <= $3::date),
+              0
+            )
           ) * COALESCE(i.cost_price, 0), 2
-        )                                                   AS total_cost
+        )                                                             AS total_cost
       FROM inventory_items i
       WHERE i.branch_id = $1
         AND i.purchased_at::date >= $2::date
