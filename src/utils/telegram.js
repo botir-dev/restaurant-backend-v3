@@ -2,17 +2,15 @@ const https = require('https');
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8816564334:AAG86mUswxMDWbTj5Grd4MeoaW7liDqExho';
 
-/**
- * Telegram ga xabar yuborish
- * @param {string} chatId
- * @param {string} text
- */
 const sendTelegramMessage = (chatId, text) => {
-  if (!chatId) return Promise.resolve();
+  if (!chatId) {
+    console.log('[Telegram] chatId yo'q, xabar yuborilmadi');
+    return Promise.resolve();
+  }
 
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
-      chat_id: chatId,
+      chat_id: String(chatId),
       text,
       parse_mode: 'HTML',
     });
@@ -30,10 +28,27 @@ const sendTelegramMessage = (chatId, text) => {
     const req = https.request(options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => resolve(JSON.parse(data)));
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (!parsed.ok) {
+            console.error('[Telegram] Xabar yuborishda xato:', parsed.description);
+          } else {
+            console.log('[Telegram] Xabar yuborildi, chat_id:', chatId);
+          }
+          resolve(parsed);
+        } catch (e) {
+          console.error('[Telegram] JSON parse xatosi:', data);
+          resolve({});
+        }
+      });
     });
 
-    req.on('error', reject);
+    req.on('error', (err) => {
+      console.error('[Telegram] Request xatosi:', err.message);
+      reject(err);
+    });
+
     req.write(body);
     req.end();
   });
