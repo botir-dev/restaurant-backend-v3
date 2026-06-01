@@ -24,6 +24,11 @@ const menuRoutes      = require('./modules/menu/menu.routes');
 
 const app = express();
 
+// ─── TRUST PROXY — Render.com / reverse proxy ortida ishlash ──
+// Bu bo'lmasa express-rate-limit X-Forwarded-For xatosi beradi
+// va SameSite cookie lar cross-origin so'rovlarda bloklanadi
+app.set('trust proxy', 1);
+
 // ─── HELMET + CSP ─────────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
