@@ -97,6 +97,7 @@ router.post('/orders', async (req, res) => {
   }
 
   const { v4: uuidv4 } = require('uuid');
+const { checkInventoryAlerts } = require('../../utils/inventory.alerts');
   const client = await pool.connect();
 
   try {
@@ -179,6 +180,7 @@ router.post('/orders', async (req, res) => {
       [orderId, table_id]
     );
 
+    const qrAffectedIds = [];
     // ─── OMBORDAN AVTOMATIK AYIRISH (retsept bo'yicha) ────────
     for (const eItem of enrichedItems) {
       const recipeRes = await client.query(
@@ -214,11 +216,19 @@ router.post('/orders', async (req, res) => {
             currentStock, Math.max(0, afterStock)
           ]
         );
+        if (!qrAffectedIds.includes(rLine.inventory_item_id)) {
+          qrAffectedIds.push(rLine.inventory_item_id);
+        }
       }
     }
     // ─────────────────────────────────────────────────────────
 
     await client.query('COMMIT');
+
+    // Inventory alert tekshirish (fon rejimida)
+    if (qrAffectedIds.length > 0) {
+      checkInventoryAlerts(branch_id, qrAffectedIds).catch(() => {});
+    }
 
     // ─── WS xabarlari ─────────────────────────────────────
     const branchUsersResult = await pool.query(
