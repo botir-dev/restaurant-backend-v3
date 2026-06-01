@@ -4,7 +4,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8816564334:AAG86mUswxM
 
 const sendTelegramMessage = (chatId, text) => {
   if (!chatId) {
-    console.log('[Telegram] chatId yo'q, xabar yuborilmadi');
+    console.log('[Telegram] chatId mavjud emas, xabar yuborilmadi');
     return Promise.resolve();
   }
 
@@ -17,7 +17,7 @@ const sendTelegramMessage = (chatId, text) => {
 
     const options = {
       hostname: 'api.telegram.org',
-      path: `/bot${TELEGRAM_TOKEN}/sendMessage`,
+      path: '/bot' + TELEGRAM_TOKEN + '/sendMessage',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -32,7 +32,7 @@ const sendTelegramMessage = (chatId, text) => {
         try {
           const parsed = JSON.parse(data);
           if (!parsed.ok) {
-            console.error('[Telegram] Xabar yuborishda xato:', parsed.description);
+            console.error('[Telegram] Xato:', parsed.description);
           } else {
             console.log('[Telegram] Xabar yuborildi, chat_id:', chatId);
           }
