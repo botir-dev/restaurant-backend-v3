@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../../config/database');
 const { success, created, error, paginate } = require('../../utils/response.utils');
+const { isPreparerRole, getAllowedTypes } = require('../../utils/roles.utils');
 
 // ─── GET /menu ─────────────────────────────────────────────────
 const getMenuItems = async (req, res) => {
@@ -8,13 +9,29 @@ const getMenuItems = async (req, res) => {
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
   const offset = (page - 1) * limit;
   const { type, is_available, search } = req.query;
+  const { role, extra_permissions } = req.user;
 
   try {
     let where = `WHERE mi.branch_id = $1 AND mi.restaurant_id = $2`;
     const params = [req.branchId, req.restaurantId];
     let idx = 3;
 
-    if (type) { where += ` AND mi.type = $${idx++}`; params.push(type); }
+    // Tayyorlovchi rollar faqat o'z mahsulot turlarini ko'radi
+    if (isPreparerRole(role)) {
+      const allowedTypes = await getAllowedTypes(role, extra_permissions, req.branchId);
+      if (allowedTypes.length === 0) return paginate(res, [], 0, page, limit);
+      if (type && allowedTypes.includes(type)) {
+        where += ` AND mi.type = $${idx++}`; params.push(type);
+      } else if (type) {
+        // So'ralgan type ruxsatsiz — bo'sh qaytarish
+        return paginate(res, [], 0, page, limit);
+      } else {
+        // Filter qo'llanmagan — faqat ruxsat etilgan turlarni ko'rsatish
+        where += ` AND mi.type = ANY($${idx++}::text[])`; params.push(allowedTypes);
+      }
+    } else {
+      if (type) { where += ` AND mi.type = $${idx++}`; params.push(type); }
+    }
     if (is_available !== undefined) {
       where += ` AND mi.is_available = $${idx++}`;
       params.push(is_available === 'true');
