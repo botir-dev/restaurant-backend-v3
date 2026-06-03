@@ -18,7 +18,7 @@ const validatePassword = (password) => {
 const getStaff = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, full_name, username, phone, role, extra_permissions, is_active, monthly_salary, use_commission, created_at
+      `SELECT id, full_name, username, phone, role, extra_permissions, is_active, monthly_salary, use_commission, telegram_chat_id, created_at
        FROM users
        WHERE branch_id = $1 AND restaurant_id = $2
          AND role != 'super_admin' AND is_active = TRUE
@@ -35,7 +35,7 @@ const getStaff = async (req, res) => {
 
 // POST /staff
 const createStaff = async (req, res) => {
-  const { full_name, username, phone, password, role, extra_permissions } = req.body;
+  const { full_name, username, phone, password, role, extra_permissions, telegram_chat_id } = req.body;
   if (!full_name || !username || !password || !role) {
     return error(res, 'Ism, username, parol va rol talab qilinadi');
   }
@@ -58,11 +58,11 @@ const createStaff = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 12);
 
     const result = await pool.query(
-      `INSERT INTO users (id, restaurant_id, branch_id, full_name, username, phone, password_hash, role, extra_permissions)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, full_name, username, role, extra_permissions`,
+      `INSERT INTO users (id, restaurant_id, branch_id, full_name, username, phone, password_hash, role, extra_permissions, telegram_chat_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, full_name, username, role, extra_permissions, telegram_chat_id`,
       [uuidv4(), req.restaurantId, req.branchId, full_name, username, phone,
-       passwordHash, role, extra_permissions || []]
+       passwordHash, role, extra_permissions || [], telegram_chat_id || null]
     );
     return created(res, result.rows[0], 'Hodim yaratildi');
   } catch (err) {
@@ -75,7 +75,7 @@ const createStaff = async (req, res) => {
 // PUT /staff/:id
 const updateStaff = async (req, res) => {
   const { id } = req.params;
-  const { full_name, phone, password, role, extra_permissions, monthly_salary } = req.body;
+  const { full_name, phone, password, role, extra_permissions, monthly_salary, telegram_chat_id } = req.body;
 
   try {
     // Manager o'zini yangilayapti yoki boshqa xodimni?
@@ -99,10 +99,11 @@ const updateStaff = async (req, res) => {
         `UPDATE users SET
           monthly_salary = COALESCE($1, monthly_salary),
           password_hash = COALESCE($2, password_hash),
+          telegram_chat_id = COALESCE($3, telegram_chat_id),
           updated_at = NOW()
-         WHERE id = $3 AND branch_id = $4
-         RETURNING id, full_name, username, role, extra_permissions, monthly_salary, use_commission`,
-        [monthly_salary !== undefined ? monthly_salary : null, passwordHash, id, req.branchId]
+         WHERE id = $4 AND branch_id = $5
+         RETURNING id, full_name, username, role, extra_permissions, monthly_salary, use_commission, telegram_chat_id`,
+        [monthly_salary !== undefined ? monthly_salary : null, passwordHash, telegram_chat_id !== undefined ? (telegram_chat_id || null) : null, id, req.branchId]
       );
       return success(res, result.rows[0], 'Yangilandi');
     }
@@ -137,11 +138,14 @@ const updateStaff = async (req, res) => {
         extra_permissions = COALESCE($5, extra_permissions),
         monthly_salary = COALESCE($6, monthly_salary),
         use_commission = COALESCE($7, use_commission),
+        telegram_chat_id = COALESCE($8, telegram_chat_id),
         updated_at = NOW()
-       WHERE id = $8 AND branch_id = $9
-       RETURNING id, full_name, username, role, extra_permissions, monthly_salary, use_commission`,
+       WHERE id = $9 AND branch_id = $10
+       RETURNING id, full_name, username, role, extra_permissions, monthly_salary, use_commission, telegram_chat_id`,
       [full_name, phone, passwordHash, role, extra_permissions, salary,
-       use_commission !== undefined ? use_commission : null, id, req.branchId]
+       use_commission !== undefined ? use_commission : null,
+       telegram_chat_id !== undefined ? (telegram_chat_id || null) : null,
+       id, req.branchId]
     );
     if (result.rows.length === 0) return error(res, 'Hodim topilmadi', 404);
     return success(res, result.rows[0], 'Hodim yangilandi');
