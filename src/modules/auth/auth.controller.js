@@ -150,13 +150,33 @@ const verifyOtp = async (req, res) => {
 
 // Token berish — ichki yordamchi funksiya
 const issueTokens = async (res, user, deviceToken = null) => {
+  const extraPerms = parsePermissions(user.extra_permissions);
+
+  // Custom rol uchun product_type_key ni DB dan olish
+  const STANDARD_ROLES = [
+    'manager', 'waiter', 'cashier', 'storekeeper', 'super_admin',
+    'cook', 'baker', 'somsa_maker', 'grill_master',
+    'turkish_cook', 'bartender', 'icecream_maker', 'tea_master'
+  ];
+  let productTypeKey = null;
+  if (!STANDARD_ROLES.includes(user.role) && user.branch_id) {
+    try {
+      const cr = await pool.query(
+        `SELECT product_type_key FROM custom_roles WHERE key = $1 AND branch_id = $2`,
+        [user.role, user.branch_id]
+      );
+      productTypeKey = cr.rows[0]?.product_type_key || null;
+    } catch (_) {}
+  }
+
   const payload = {
     user_id: user.id,
     full_name: user.full_name,
     role: user.role,
     restaurant_id: user.restaurant_id,
     branch_id: user.branch_id,
-    extra_permissions: parsePermissions(user.extra_permissions),
+    extra_permissions: extraPerms,
+    ...(productTypeKey ? { product_type_key: productTypeKey } : {}),
   };
 
   const accessToken  = generateAccessToken(payload);
@@ -173,10 +193,11 @@ const issueTokens = async (res, user, deviceToken = null) => {
   return success(res, {
     access_token: accessToken,
     role: user.role,
-    extra_permissions: parsePermissions(user.extra_permissions),
+    extra_permissions: extraPerms,
     branch_id: user.branch_id,
     restaurant_id: user.restaurant_id,
     full_name: user.full_name,
+    ...(productTypeKey ? { product_type_key: productTypeKey } : {}),
     ...(deviceToken ? { device_token: deviceToken } : {}),
   }, 'Muvaffaqiyatli kirildi');
 };
@@ -210,13 +231,30 @@ const refresh = async (req, res) => {
     }
 
     const user = userResult.rows[0];
+    const refreshExtraPerms = parsePermissions(user.extra_permissions);
+    let refreshProductTypeKey = null;
+    const STANDARD_ROLES_R = [
+      'manager', 'waiter', 'cashier', 'storekeeper', 'super_admin',
+      'cook', 'baker', 'somsa_maker', 'grill_master',
+      'turkish_cook', 'bartender', 'icecream_maker', 'tea_master'
+    ];
+    if (!STANDARD_ROLES_R.includes(user.role) && user.branch_id) {
+      try {
+        const cr = await pool.query(
+          `SELECT product_type_key FROM custom_roles WHERE key = $1 AND branch_id = $2`,
+          [user.role, user.branch_id]
+        );
+        refreshProductTypeKey = cr.rows[0]?.product_type_key || null;
+      } catch (_) {}
+    }
     const newPayload = {
       user_id: user.id,
       full_name: user.full_name,
       role: user.role,
       restaurant_id: user.restaurant_id,
       branch_id: user.branch_id,
-      extra_permissions: parsePermissions(user.extra_permissions),
+      extra_permissions: refreshExtraPerms,
+      ...(refreshProductTypeKey ? { product_type_key: refreshProductTypeKey } : {}),
     };
 
     const newAccessToken  = generateAccessToken(newPayload);
