@@ -62,7 +62,7 @@ const startCronJobs = () => {
     const tashkent = new Date(now.getTime() + 5 * 60 * 60 * 1000);
     const h = tashkent.getUTCHours();
     const m = tashkent.getUTCMinutes();
-    if (h === 10 && m === 24) {
+    if (h === 23 && m === 59) {
       console.log('[Cron] 23:59 — kunlik hisobot yuborilmoqda...');
       sendDailyReport();
     }
