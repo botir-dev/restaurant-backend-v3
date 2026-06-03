@@ -4,7 +4,6 @@ const { sendDailyReport } = require('./daily.report');
 
 /**
  * Muddati o'tgan bronlarni avtomatik bekor qiladi.
- * Xato bo'lsa qayta urinish mexanizmi bilan.
  */
 const cancelExpiredReservations = async (retryCount = 0) => {
   try {
@@ -20,7 +19,6 @@ const cancelExpiredReservations = async (retryCount = 0) => {
     }
   } catch (err) {
     console.error(`[Cron] Bron bekor qilish xatosi (urinish: ${retryCount + 1}):`, err.message);
-    // 3 marta qayta urinish — 10 soniyadan keyin
     if (retryCount < 2) {
       setTimeout(() => cancelExpiredReservations(retryCount + 1), 10_000);
     } else {
@@ -55,18 +53,29 @@ const startCronJobs = () => {
   // Har 6 soatda inventory ogohlantirishlarni tekshirish
   setInterval(checkAllBranchInventory, 6 * 60 * 60 * 1000);
 
-  // Har daqiqa soat 23:59 ni tekshirish (Toshkent vaqti)
+  // ─── KUNLIK HISOBOT (Toshkent 23:59) ─────────────────────────
+  // setInterval o'rniga — har 30 soniyada tekshirish + lastReportDate
+  // Bu restart/deploy natijasida o'tkazib yuborishni oldini oladi:
+  // agar server 23:58 da restart bo'lib 00:00 da ko'tarilsa,
+  // u holda 23:xx soatida hisobot yuborilmagan bo'lsa — darhol yuboradi
+  let lastReportDate = '';
+
   setInterval(() => {
     const now = new Date();
-    // UTC+5 Toshkent vaqtiga o'tkazish
+    // UTC+5 — Toshkent vaqti
     const tashkent = new Date(now.getTime() + 5 * 60 * 60 * 1000);
     const h = tashkent.getUTCHours();
     const m = tashkent.getUTCMinutes();
-    if (h === 23 && m === 59) {
-      console.log('[Cron] 23:59 — kunlik hisobot yuborilmoqda...');
+    const todayStr = tashkent.toISOString().split('T')[0]; // "2026-06-03"
+
+    // 23:55 dan 23:59 gacha oraliqda — 1 daqiqa kutmasdan ishonchli tutib olish
+    // Shart: bugun hali hisobot yuborilmagan bo'lsin
+    if (h === 23 && m >= 55 && lastReportDate !== todayStr) {
+      lastReportDate = todayStr;
+      console.log(`[Cron] ${h}:${String(m).padStart(2,'0')} — kunlik hisobot yuborilmoqda... (${todayStr})`);
       sendDailyReport();
     }
-  }, 60 * 1000);
+  }, 30 * 1000); // har 30 soniyada tekshirish
 
   // Ishga tushganda bir marta darhol bajarish
   cancelExpiredReservations();
