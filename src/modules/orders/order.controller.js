@@ -398,15 +398,29 @@ const prepareItem = async (req, res) => {
       [JSON.stringify(order.items), newStatus, id]
     );
 
-    if (allPrepared) {
-      const notifyUserId = ['takeaway','delivery'].includes(order.order_type)
-        ? order.cashier_id || order.waiter_id
-        : order.waiter_id;
-      if (notifyUserId) {
+    // Har bir item tayyor bo'lganda waiterga bildirishnoma yuborish
+    const notifyUserId = ['takeaway','delivery'].includes(order.order_type)
+      ? order.cashier_id || order.waiter_id
+      : order.waiter_id;
+
+    if (notifyUserId) {
+      if (allPrepared) {
+        // Barcha itemlar tayyor — eski xabar
         wsManager.sendToUser(notifyUserId, 'order_ready', {
           message: order.order_type === 'takeaway' ? 'Saboy tayyor!' :
                    order.order_type === 'delivery' ? 'Dostavka tayyor!' : 'Buyurtma tayyor!',
           order_id: id, table_id: order.table_id, order_type: order.order_type,
+        });
+      } else {
+        // Bitta item tayyor — yangi bildirishnoma
+        wsManager.sendToUser(notifyUserId, 'item_ready', {
+          message: `"${item.name}" tayyor!`,
+          order_id: id,
+          table_id: order.table_id,
+          item_id: itemId,
+          item_name: item.name,
+          prepared_count: order.items.filter(i => i.is_prepared).length,
+          total_count: order.items.length,
         });
       }
     }
