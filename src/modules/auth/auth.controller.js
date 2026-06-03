@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const pool = require('../../config/database');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../../utils/jwt.utils');
 const { success, error } = require('../../utils/response.utils');
+const { sendTelegramMessage } = require('../../utils/telegram');
 
 const parsePermissions = (val) => {
   if (!val || val === '{}') return [];
@@ -10,22 +11,24 @@ const parsePermissions = (val) => {
   return val.replace(/^{|}$/g, '').split(',').filter(Boolean);
 };
 
-// Cookie options — bir joyda boshqarish uchun
-// SameSite=None + Secure — cross-site so'rovlar uchun majburiy.
-// Frontend (restaurant.botirdev.uz) va backend (onrender.com) turli
-// domenlar bo'lgani uchun SameSite=Strict bilan cookie HECH QACHON
-// yuborilmaydi → refresh doim 401 beradi!
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: true,        // SameSite=None uchun Secure majburiy (HTTPS kerak)
-  sameSite: 'none',    // cross-site cookie — turli domenlar orasida ishlaydi
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 kun (ms)
+  secure: true,
+  sameSite: 'none',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
 };
 
+// 6 raqamli kod generatsiya
+const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+
+// Vaqtinchalik OTP larni xotirada saqlash (production da Redis ishlatish mumkin)
+// { key: `otp:${userId}` → { code, expires, userData } }
+const otpStore = new Map();
+
 // POST /auth/login
 const login = async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, device_token } = req.body;
   if (!username || !password) {
     return error(res, 'Username va parol talab qilinadi');
   }
@@ -49,46 +52,137 @@ const login = async (req, res) => {
       return error(res, "Username yoki parol noto'g'ri", 401);
     }
 
-    const payload = {
-      user_id: user.id,
-      full_name: user.full_name,
-      role: user.role,
-      restaurant_id: user.restaurant_id,
-      branch_id: user.branch_id,
-      extra_permissions: parsePermissions(user.extra_permissions),
-    };
+    // ── 2FA tekshiruvi ────────────────────────────────────────
+    if (user.telegram_chat_id) {
+      // Qurilma ishonchli ekanligini tekshirish
+      if (device_token) {
+        const deviceCheck = await pool.query(
+          `SELECT id FROM trusted_devices
+           WHERE user_id = $1 AND device_token = $2 AND expires_at > NOW()`,
+          [user.id, device_token]
+        );
+        if (deviceCheck.rows.length > 0) {
+          // Ishonchli qurilma — 2FA siz login
+          return await issueTokens(res, user);
+        }
+      }
 
-    const accessToken  = generateAccessToken(payload);
-    const refreshToken = generateRefreshToken({ user_id: user.id });
+      // OTP yuborish
+      const otp = generateOtp();
+      const otpKey = `otp:${user.id}`;
+      otpStore.set(otpKey, {
+        code: otp,
+        expires: Date.now() + 5 * 60 * 1000, // 5 daqiqa
+        userData: user,
+      });
 
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await pool.query(
-      `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)`,
-      [uuidv4(), user.id, refreshToken, expiresAt]
-    );
+      // Eski OTP larni tozalash (10 daqiqada bir)
+      setTimeout(() => {
+        const entry = otpStore.get(otpKey);
+        if (entry && entry.expires < Date.now()) otpStore.delete(otpKey);
+      }, 10 * 60 * 1000);
 
-    // refresh_token — HttpOnly cookie
-    res.cookie('refresh_token', refreshToken, REFRESH_COOKIE_OPTIONS);
+      try {
+        await sendTelegramMessage(
+          user.telegram_chat_id,
+          `🔐 <b>Kirish kodi</b>\n\nKod: <b>${otp}</b>\n\nUshbu kod 5 daqiqa davomida amal qiladi.\nAgar siz kirmoqchi bo'lmagan bo'lsangiz, parolingizni o'zgartiring!`
+        );
+      } catch (e) {
+        console.error('[2FA] Telegram xabar yuborishda xato:', e.message);
+        return error(res, 'Telegram xabar yuborishda xato. Chat ID ni tekshiring.', 500);
+      }
 
-    // access_token — response body (frontend memory ga saqlaydi)
-    return success(res, {
-      access_token: accessToken,
-      role: user.role,
-      extra_permissions: parsePermissions(user.extra_permissions),
-      branch_id: user.branch_id,
-      restaurant_id: user.restaurant_id,
-      full_name: user.full_name,
-      // refresh_token body dan olib tashlandi
-    }, 'Muvaffaqiyatli kirildi');
+      return success(res, {
+        requires_2fa: true,
+        user_id: user.id,
+        message: 'Telegram ga kod yuborildi',
+      }, '2FA kodi yuborildi');
+    }
+
+    // telegram_chat_id yo'q — to'g'ridan login
+    return await issueTokens(res, user);
 
   } catch (err) {
+    console.error('[login]', err.message);
     return error(res, 'Server xatosi', 500);
   }
 };
 
+// POST /auth/verify-otp
+const verifyOtp = async (req, res) => {
+  const { user_id, code, trust_device } = req.body;
+  if (!user_id || !code) {
+    return error(res, 'user_id va code talab qilinadi');
+  }
+
+  const otpKey = `otp:${user_id}`;
+  const entry = otpStore.get(otpKey);
+
+  if (!entry) {
+    return error(res, 'Kod topilmadi yoki muddati o\'tgan. Qayta login qiling.', 400);
+  }
+  if (Date.now() > entry.expires) {
+    otpStore.delete(otpKey);
+    return error(res, 'Kod muddati o\'tgan. Qayta login qiling.', 400);
+  }
+  if (entry.code !== String(code).trim()) {
+    return error(res, 'Kod noto\'g\'ri', 400);
+  }
+
+  otpStore.delete(otpKey);
+  const user = entry.userData;
+
+  // Qurilmani eslab qolish
+  let deviceToken = null;
+  if (trust_device) {
+    deviceToken = uuidv4();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 kun
+    const userAgent = req.headers['user-agent'] || '';
+    await pool.query(
+      `INSERT INTO trusted_devices (id, user_id, device_token, user_agent, expires_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [uuidv4(), user.id, deviceToken, userAgent, expiresAt]
+    );
+  }
+
+  return await issueTokens(res, user, deviceToken);
+};
+
+// Token berish — ichki yordamchi funksiya
+const issueTokens = async (res, user, deviceToken = null) => {
+  const payload = {
+    user_id: user.id,
+    full_name: user.full_name,
+    role: user.role,
+    restaurant_id: user.restaurant_id,
+    branch_id: user.branch_id,
+    extra_permissions: parsePermissions(user.extra_permissions),
+  };
+
+  const accessToken  = generateAccessToken(payload);
+  const refreshToken = generateRefreshToken({ user_id: user.id });
+
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await pool.query(
+    `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)`,
+    [uuidv4(), user.id, refreshToken, expiresAt]
+  );
+
+  res.cookie('refresh_token', refreshToken, REFRESH_COOKIE_OPTIONS);
+
+  return success(res, {
+    access_token: accessToken,
+    role: user.role,
+    extra_permissions: parsePermissions(user.extra_permissions),
+    branch_id: user.branch_id,
+    restaurant_id: user.restaurant_id,
+    full_name: user.full_name,
+    ...(deviceToken ? { device_token: deviceToken } : {}),
+  }, 'Muvaffaqiyatli kirildi');
+};
+
 // POST /auth/refresh
 const refresh = async (req, res) => {
-  // Cookie dan olish, body dan emas
   const refreshToken = req.cookies?.refresh_token || req.body?.refresh_token;
   if (!refreshToken) return error(res, 'Refresh token talab qilinadi', 401);
 
@@ -134,13 +228,9 @@ const refresh = async (req, res) => {
       [uuidv4(), user.id, newRefreshToken, expiresAt]
     );
 
-    // Yangi refresh_token — cookie ga
     res.cookie('refresh_token', newRefreshToken, REFRESH_COOKIE_OPTIONS);
 
-    return success(res, {
-      access_token: newAccessToken,
-      // refresh_token body dan olib tashlandi
-    }, 'Token yangilandi');
+    return success(res, { access_token: newAccessToken }, 'Token yangilandi');
 
   } catch (err) {
     res.clearCookie('refresh_token', { path: '/' });
@@ -162,6 +252,7 @@ const logout = async (req, res) => {
 const logoutAll = async (req, res) => {
   try {
     await pool.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [req.user.user_id]);
+    await pool.query(`DELETE FROM trusted_devices WHERE user_id = $1`, [req.user.user_id]);
     res.clearCookie('refresh_token', { path: '/' });
     return success(res, {}, "Barcha qurilmalardan chiqildi");
   } catch (err) {
@@ -176,7 +267,7 @@ const changePassword = async (req, res) => {
     return error(res, 'Eski va yangi parol talab qilinadi');
   }
   if (new_password.length < 8) {
-    return error(res, 'Yangi parol kamida 8 ta belgidan iborat bo\'lishi kerak');
+    return error(res, "Yangi parol kamida 8 ta belgidan iborat bo'lishi kerak");
   }
   if (!/[A-Z]/.test(new_password) || !/[0-9]/.test(new_password)) {
     return error(res, "Parol kamida 1 ta katta harf va 1 ta raqam bo'lishi kerak");
@@ -199,6 +290,7 @@ const changePassword = async (req, res) => {
     );
 
     await pool.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [req.user.user_id]);
+    await pool.query(`DELETE FROM trusted_devices WHERE user_id = $1`, [req.user.user_id]);
     res.clearCookie('refresh_token', { path: '/' });
 
     return success(res, {}, "Parol muvaffaqiyatli o'zgartirildi");
@@ -207,4 +299,4 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { login, refresh, logout, logoutAll, changePassword };
+module.exports = { login, verifyOtp, refresh, logout, logoutAll, changePassword };
