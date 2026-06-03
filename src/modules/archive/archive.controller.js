@@ -552,6 +552,8 @@ const getExpenses30Report = async (req, res) => {
     let commissionStaff = { rows: [] };
     try {
       // waiter_earnings dan waiterlar
+      // INNER JOIN — faqat haqiqatan maosh olganlar ko'rinsin (use_commission sharti yo'q,
+      // chunki payment.controller waiter_earnings ga use_commission tekshirmasdan yozadi)
       const waiterRows = await pool.query(`
         SELECT
           u.full_name,
@@ -560,19 +562,21 @@ const getExpenses30Report = async (req, res) => {
           u.monthly_salary,
           COALESCE(SUM(we.earned_amount), 0) AS earned
         FROM users u
-        LEFT JOIN waiter_earnings we
+        INNER JOIN waiter_earnings we
           ON we.waiter_id = u.id
+         AND we.branch_id = $1
          AND we.date >= $2::date
          AND we.date <= $3::date
         WHERE u.branch_id = $1
           AND u.is_active = TRUE
-          AND u.use_commission = TRUE
           AND u.role NOT IN ('super_admin')
         GROUP BY u.id, u.full_name, u.role, u.use_commission, u.monthly_salary
+        HAVING COALESCE(SUM(we.earned_amount), 0) > 0
         ORDER BY u.full_name
       `, [branchId, fromDate, toDate]);
 
-      // role_earnings dan boshqa foizli hodimlar (cashier, cook, etc.)
+      // role_earnings dan boshqa foizli hodimlar (cashier, cook, va boshqa rollar)
+      // INNER JOIN — faqat haqiqatan maosh olganlar ko'rinsin
       const roleRows = await pool.query(`
         SELECT
           u.full_name,
@@ -581,15 +585,16 @@ const getExpenses30Report = async (req, res) => {
           u.monthly_salary,
           COALESCE(SUM(re.earned_amount), 0) AS earned
         FROM users u
-        LEFT JOIN role_earnings re
+        INNER JOIN role_earnings re
           ON re.user_id = u.id
+         AND re.branch_id = $1
          AND re.date >= $2::date
          AND re.date <= $3::date
         WHERE u.branch_id = $1
           AND u.is_active = TRUE
-          AND u.use_commission = TRUE
           AND u.role NOT IN ('super_admin', 'waiter')
         GROUP BY u.id, u.full_name, u.role, u.use_commission, u.monthly_salary
+        HAVING COALESCE(SUM(re.earned_amount), 0) > 0
         ORDER BY u.full_name
       `, [branchId, fromDate, toDate]);
 
