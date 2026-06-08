@@ -654,9 +654,42 @@ const getExpenses30Report = async (req, res) => {
     // QQS 12% hisoblash (agar vat_amount yo'q bo'lsa daromaddan 12% hisoblaymiz)
     const vatAmount = totalVat > 0 ? totalVat : Math.round(totalRevenue * 0.12);
 
-    // ── 4. Umumiy harajat ─────────────────────────────────────
+    // ── 4. Staff Meal chiqimlari ──────────────────────────────
+    // Ombordan ketgan mahsulotlar (staff_meal sababli), tannarx bo'yicha hisoblanadi
+    let staffMealRows = { rows: [] };
+    let totalStaffMealCost = 0;
+    try {
+      staffMealRows = await pool.query(`
+        SELECT
+          sm.menu_item_name,
+          SUM(sm.quantity)  AS total_portions
+        FROM staff_meals sm
+        WHERE sm.branch_id = $1
+          AND sm.created_at::date >= $2::date
+          AND sm.created_at::date <= $3::date
+        GROUP BY sm.menu_item_name
+        ORDER BY total_portions DESC
+      `, [branchId, fromDate, toDate]);
+
+      // Ombordan ketgan mahsulotlar tannarxi
+      const staffMealCostRes = await pool.query(`
+        SELECT
+          ABS(SUM(l.change_amount * COALESCE(i.cost_price, 0))) AS total_cost
+        FROM inventory_logs l
+        JOIN inventory_items i ON i.id = l.inventory_item_id
+        WHERE l.branch_id = $1
+          AND l.reason = 'staff_meal'
+          AND l.created_at::date >= $2::date
+          AND l.created_at::date <= $3::date
+      `, [branchId, fromDate, toDate]);
+      totalStaffMealCost = parseFloat(staffMealCostRes.rows[0]?.total_cost || 0);
+    } catch (e) {
+      console.warn('staff_meal cost query error:', e.message);
+    }
+
+    // ── 5. Umumiy harajat ─────────────────────────────────────
     const totalUtilities = electricity + water + gas;
-    const totalExpenses  = vatAmount + totalUtilities + totalSalary + totalInventory;
+    const totalExpenses  = vatAmount + totalUtilities + totalSalary + totalInventory + totalStaffMealCost;
 
     return success(res, {
       period: { from: fromDate, to: toDate },
@@ -673,6 +706,10 @@ const getExpenses30Report = async (req, res) => {
         total_orders: parseInt(ordersData.total_orders || 0),
         total_revenue: totalRevenue,
         vat_amount: vatAmount,
+      },
+      staff_meals: {
+        rows: staffMealRows.rows,
+        total_cost: totalStaffMealCost,
       },
       grand_total: totalExpenses,
     });
