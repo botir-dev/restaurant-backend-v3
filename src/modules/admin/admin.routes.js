@@ -22,4 +22,10 @@ router.post('/managers', c.createManager);
 router.put('/managers/:id', c.updateManager);
 router.delete('/managers/:id', c.deleteManager);
 
+// Ownerlar
+router.get('/owners', c.getOwners);
+router.post('/owners', c.createOwner);
+router.put('/owners/:id', c.updateOwner);
+router.delete('/owners/:id', c.deleteOwner);
+
 module.exports = router;
