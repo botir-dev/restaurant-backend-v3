@@ -219,8 +219,99 @@ const deleteManager = async (req, res) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
+// OWNER CRUD (faqat super_admin)
+// ─────────────────────────────────────────────────────────────
+
+// GET /admin/owners?restaurant_id=
+const getOwners = async (req, res) => {
+  const { restaurant_id } = req.query;
+  try {
+    let query = `SELECT u.id, u.full_name, u.username, u.phone, u.is_active,
+                        u.restaurant_id, r.name as restaurant_name, u.created_at
+                 FROM users u
+                 LEFT JOIN restaurants r ON r.id = u.restaurant_id
+                 WHERE u.role = 'owner'`;
+    const params = [];
+    if (restaurant_id) { query += ` AND u.restaurant_id = $1`; params.push(restaurant_id); }
+    query += ` ORDER BY u.created_at DESC`;
+    const result = await pool.query(query, params);
+    return success(res, result.rows);
+  } catch (err) {
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
+// POST /admin/owners
+const createOwner = async (req, res) => {
+  const { restaurant_id, full_name, username, phone, password } = req.body;
+  if (!restaurant_id || !full_name || !username || !password)
+    return error(res, 'restaurant_id, full_name, username va password talab qilinadi');
+
+  try {
+    // Bir restoranda faqat bitta owner bo'lishi mumkin
+    const existing = await pool.query(
+      `SELECT id FROM users WHERE restaurant_id = $1 AND role = 'owner'`,
+      [restaurant_id]
+    );
+    if (existing.rows.length > 0)
+      return error(res, 'Bu restoranda allaqachon owner mavjud');
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const result = await pool.query(
+      `INSERT INTO users (id, restaurant_id, branch_id, full_name, username, phone, password_hash, role)
+       VALUES ($1, $2, NULL, $3, $4, $5, $6, 'owner')
+       RETURNING id, full_name, username, role, restaurant_id`,
+      [uuidv4(), restaurant_id, full_name, username, phone || null, passwordHash]
+    );
+    return created(res, result.rows[0], 'Owner yaratildi');
+  } catch (err) {
+    if (err.code === '23505') return error(res, 'Bu username allaqachon mavjud');
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
+// PUT /admin/owners/:id
+const updateOwner = async (req, res) => {
+  const { id } = req.params;
+  const { full_name, phone, is_active } = req.body;
+  // Parol o'zgartirilmaydi — owner o'z parolini o'zgartira olmaydi
+  try {
+    const result = await pool.query(
+      `UPDATE users SET
+         full_name = COALESCE($1, full_name),
+         phone     = COALESCE($2, phone),
+         is_active = COALESCE($3, is_active),
+         updated_at = NOW()
+       WHERE id = $4 AND role = 'owner'
+       RETURNING id, full_name, username, phone, is_active, role`,
+      [full_name || null, phone || null, is_active ?? null, id]
+    );
+    if (result.rows.length === 0) return error(res, 'Owner topilmadi', 404);
+    return success(res, result.rows[0], 'Owner yangilandi');
+  } catch (err) {
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
+// DELETE /admin/owners/:id
+const deleteOwner = async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query(`DELETE FROM users WHERE id = $1 AND role = 'owner'`, [id]);
+    return success(res, {}, 'Owner o\'chirildi');
+  } catch (err) {
+    console.error(err);
+    return error(res, 'Server xatosi', 500);
+  }
+};
+
 module.exports = {
   getRestaurants, createRestaurant, updateRestaurant, deleteRestaurant,
   getBranches, createBranch, updateBranch,
-  getManagers, createManager, updateManager, deleteManager
+  getManagers, createManager, updateManager, deleteManager,
+  getOwners, createOwner, updateOwner, deleteOwner,
 };
