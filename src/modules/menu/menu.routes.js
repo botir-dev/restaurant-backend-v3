@@ -6,6 +6,7 @@ const {
   deleteMenuItem, toggleMenuAvailability
 } = require('./menu.controller');
 const { isPreparerRole, getAllowedTypes } = require('../../utils/roles.utils');
+const { requireFeature } = require('../../middleware/tariff.middleware');
 
 const CAN_MANAGE = ['manager', 'storekeeper', 'super_admin'];
 const canManage = (req, res, next) => {
@@ -40,10 +41,10 @@ const canToggleAvailability = async (req, res, next) => {
 
 router.use(authenticate, branchFilter);
 
-router.get('/',                      getMenuItems);
-router.post('/',                     canManage, createMenuItem);
-router.put('/:id',                   canManage, updateMenuItem);
-router.delete('/:id',                canManage, deleteMenuItem);
-router.patch('/:id/availability',    canToggleAvailability, toggleMenuAvailability);
+router.get('/',                      requireFeature('menu_management'), getMenuItems);
+router.post('/',                     requireFeature('menu_management'), canManage, createMenuItem);
+router.put('/:id',                   requireFeature('menu_management'), canManage, updateMenuItem);
+router.delete('/:id',                requireFeature('menu_management'), canManage, deleteMenuItem);
+router.patch('/:id/availability',    requireFeature('menu_management'), canToggleAvailability, toggleMenuAvailability);
 
 module.exports = router;
