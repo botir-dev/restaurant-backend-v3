@@ -154,7 +154,7 @@ const issueTokens = async (res, user, deviceToken = null) => {
 
   // Custom rol uchun product_type_key ni DB dan olish
   const STANDARD_ROLES = [
-    'manager', 'waiter', 'cashier', 'storekeeper', 'super_admin',
+    'manager', 'waiter', 'cashier', 'storekeeper', 'super_admin', 'owner',
     'cook', 'baker', 'somsa_maker', 'grill_master',
     'turkish_cook', 'bartender', 'icecream_maker', 'tea_master'
   ];
@@ -234,7 +234,7 @@ const refresh = async (req, res) => {
     const refreshExtraPerms = parsePermissions(user.extra_permissions);
     let refreshProductTypeKey = null;
     const STANDARD_ROLES_R = [
-      'manager', 'waiter', 'cashier', 'storekeeper', 'super_admin',
+      'manager', 'waiter', 'cashier', 'storekeeper', 'super_admin', 'owner',
       'cook', 'baker', 'somsa_maker', 'grill_master',
       'turkish_cook', 'bartender', 'icecream_maker', 'tea_master'
     ];
