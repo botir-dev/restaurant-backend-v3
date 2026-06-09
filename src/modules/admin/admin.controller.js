@@ -160,7 +160,7 @@ const getManagers = async (req, res) => {
 
 // POST /admin/managers
 const createManager = async (req, res) => {
-  const { restaurant_id, branch_id, full_name, username, phone, password } = req.body;
+  const { restaurant_id, branch_id, full_name, username, phone, password, telegram_chat_id } = req.body;
   if (!restaurant_id || !branch_id || !full_name || !username || !password) {
     return error(res, 'Barcha majburiy maydonlar to\'ldirilishi kerak');
   }
@@ -168,9 +168,9 @@ const createManager = async (req, res) => {
   try {
     const passwordHash = await bcrypt.hash(password, 12);
     const result = await pool.query(
-      `INSERT INTO users (id, restaurant_id, branch_id, full_name, username, phone, password_hash, role)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'manager') RETURNING id, full_name, username, role`,
-      [uuidv4(), restaurant_id, branch_id, full_name, username, phone, passwordHash]
+      `INSERT INTO users (id, restaurant_id, branch_id, full_name, username, phone, password_hash, role, telegram_chat_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'manager', $8) RETURNING id, full_name, username, role, telegram_chat_id`,
+      [uuidv4(), restaurant_id, branch_id, full_name, username, phone || null, passwordHash, telegram_chat_id || null]
     );
     return created(res, result.rows[0], 'Menejer yaratildi');
   } catch (err) {
@@ -183,7 +183,7 @@ const createManager = async (req, res) => {
 // PUT /admin/managers/:id
 const updateManager = async (req, res) => {
   const { id } = req.params;
-  const { full_name, phone, password, is_active } = req.body;
+  const { full_name, phone, password, is_active, telegram_chat_id } = req.body;
 
   try {
     let passwordHash = undefined;
@@ -195,9 +195,10 @@ const updateManager = async (req, res) => {
         phone = COALESCE($2, phone),
         password_hash = COALESCE($3, password_hash),
         is_active = COALESCE($4, is_active),
+        telegram_chat_id = CASE WHEN $5::TEXT IS NOT NULL THEN $5::TEXT ELSE telegram_chat_id END,
         updated_at = NOW()
-       WHERE id = $5 AND role = 'manager' RETURNING id, full_name, username, role`,
-      [full_name, phone, passwordHash, is_active, id]
+       WHERE id = $6 AND role = 'manager' RETURNING id, full_name, username, role, telegram_chat_id`,
+      [full_name || null, phone || null, passwordHash || null, is_active ?? null, telegram_chat_id ?? null, id]
     );
     if (result.rows.length === 0) return error(res, 'Menejer topilmadi', 404);
     return success(res, result.rows[0], 'Menejer yangilandi');
@@ -245,12 +246,11 @@ const getOwners = async (req, res) => {
 
 // POST /admin/owners
 const createOwner = async (req, res) => {
-  const { restaurant_id, full_name, username, phone, password } = req.body;
+  const { restaurant_id, full_name, username, phone, password, telegram_chat_id } = req.body;
   if (!restaurant_id || !full_name || !username || !password)
     return error(res, 'restaurant_id, full_name, username va password talab qilinadi');
 
   try {
-    // Bir restoranda faqat bitta owner bo'lishi mumkin
     const existing = await pool.query(
       `SELECT id FROM users WHERE restaurant_id = $1 AND role = 'owner'`,
       [restaurant_id]
@@ -260,10 +260,10 @@ const createOwner = async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
     const result = await pool.query(
-      `INSERT INTO users (id, restaurant_id, branch_id, full_name, username, phone, password_hash, role)
-       VALUES ($1, $2, NULL, $3, $4, $5, $6, 'owner')
-       RETURNING id, full_name, username, role, restaurant_id`,
-      [uuidv4(), restaurant_id, full_name, username, phone || null, passwordHash]
+      `INSERT INTO users (id, restaurant_id, branch_id, full_name, username, phone, password_hash, role, telegram_chat_id)
+       VALUES ($1, $2, NULL, $3, $4, $5, $6, 'owner', $7)
+       RETURNING id, full_name, username, role, restaurant_id, telegram_chat_id`,
+      [uuidv4(), restaurant_id, full_name, username, phone || null, passwordHash, telegram_chat_id || null]
     );
     return created(res, result.rows[0], 'Owner yaratildi');
   } catch (err) {
@@ -276,18 +276,18 @@ const createOwner = async (req, res) => {
 // PUT /admin/owners/:id
 const updateOwner = async (req, res) => {
   const { id } = req.params;
-  const { full_name, phone, is_active } = req.body;
-  // Parol o'zgartirilmaydi — owner o'z parolini o'zgartira olmaydi
+  const { full_name, phone, is_active, telegram_chat_id } = req.body;
   try {
     const result = await pool.query(
       `UPDATE users SET
          full_name = COALESCE($1, full_name),
          phone     = COALESCE($2, phone),
          is_active = COALESCE($3, is_active),
+         telegram_chat_id = CASE WHEN $4::TEXT IS NOT NULL THEN $4::TEXT ELSE telegram_chat_id END,
          updated_at = NOW()
-       WHERE id = $4 AND role = 'owner'
-       RETURNING id, full_name, username, phone, is_active, role`,
-      [full_name || null, phone || null, is_active ?? null, id]
+       WHERE id = $5 AND role = 'owner'
+       RETURNING id, full_name, username, phone, is_active, role, telegram_chat_id`,
+      [full_name || null, phone || null, is_active ?? null, telegram_chat_id ?? null, id]
     );
     if (result.rows.length === 0) return error(res, 'Owner topilmadi', 404);
     return success(res, result.rows[0], 'Owner yangilandi');
