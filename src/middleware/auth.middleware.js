@@ -21,7 +21,7 @@ const STANDARD_PREPARER_ROLES = [
   'cook', 'baker', 'somsa_maker', 'grill_master',
   'turkish_cook', 'bartender', 'icecream_maker', 'tea_master'
 ];
-const NON_PREPARER_ROLES = ['manager', 'waiter', 'cashier', 'storekeeper', 'super_admin'];
+const NON_PREPARER_ROLES = ['manager', 'waiter', 'cashier', 'storekeeper', 'super_admin', 'owner'];
 
 const authorize = (...roles) => {
   return async (req, res, next) => {
@@ -50,5 +50,6 @@ const authorize = (...roles) => {
 
 const superAdminOnly = authorize('super_admin');
 const managerOrAdmin = authorize('super_admin', 'manager');
+const ownerOnly      = authorize('owner');
 
-module.exports = { authenticate, authorize, superAdminOnly, managerOrAdmin };
+module.exports = { authenticate, authorize, superAdminOnly, managerOrAdmin, ownerOnly };
