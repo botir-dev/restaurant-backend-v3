@@ -1,6 +1,7 @@
 const pool = require('../config/database');
 const { checkAllBranchInventory } = require('./inventory.alerts');
 const { sendDailyReport } = require('./daily.report');
+const { checkTariffExpiry } = require('./tariff.cron');
 
 /**
  * Muddati o'tgan bronlarni avtomatik bekor qiladi.
@@ -53,6 +54,9 @@ const startCronJobs = () => {
   // Har 6 soatda inventory ogohlantirishlarni tekshirish
   setInterval(checkAllBranchInventory, 6 * 60 * 60 * 1000);
 
+  // Har 30 daqiqada tarif muddatlarini tekshirish
+  setInterval(checkTariffExpiry, 30 * 60 * 1000);
+
   // ─── KUNLIK HISOBOT (Toshkent 23:59) ─────────────────────────
   // setInterval o'rniga — har 30 soniyada tekshirish + lastReportDate
   // Bu restart/deploy natijasida o'tkazib yuborishni oldini oladi:
@@ -81,6 +85,7 @@ const startCronJobs = () => {
   cancelExpiredReservations();
   cleanExpiredRefreshTokens();
   setTimeout(checkAllBranchInventory, 10_000);
+  setTimeout(checkTariffExpiry, 15_000); // 15 soniyadan keyin tarif tekshiruvi
 
   console.log('[Cron] Cron jobs ishga tushirildi');
 };
