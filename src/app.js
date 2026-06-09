@@ -23,6 +23,7 @@ const inventoryRoutes = require('./modules/inventory/inventory.routes');
 const menuRoutes      = require('./modules/menu/menu.routes');
 const staffMealRoutes = require('./modules/staff-meals/staff-meal.routes');
 const ownerRoutes     = require('./modules/owner/owner.routes');
+const tariffRoutes    = require('./modules/tariffs/tariff.routes');
 
 const app = express();
 
@@ -130,6 +131,7 @@ app.use('/inventory',   inventoryRoutes);
 app.use('/menu',        menuRoutes);
 app.use('/staff-meals', staffMealRoutes);
 app.use('/owner',       ownerRoutes);
+app.use('/tariffs',     tariffRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────
 app.use((req, res) => {
