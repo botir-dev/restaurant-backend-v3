@@ -22,6 +22,55 @@ const initDB = async () => {
     }
 
     // Migratsiyalar
+    // ─── TARIF JADVALLARI ─────────────────────────────────────
+    await pool.query(`CREATE TABLE IF NOT EXISTS branch_tariffs (
+      id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      branch_id     UUID NOT NULL UNIQUE REFERENCES branches(id) ON DELETE CASCADE,
+      tariff_type   VARCHAR(50),
+      status        VARCHAR(50) DEFAULT 'not_available',
+      starts_at     TIMESTAMP,
+      expires_at    TIMESTAMP,
+      grace_ends_at TIMESTAMP,
+      note          TEXT,
+      updated_at    TIMESTAMP DEFAULT NOW()
+    )`);
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS restaurant_tariffs (
+      id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      restaurant_id UUID NOT NULL UNIQUE REFERENCES restaurants(id) ON DELETE CASCADE,
+      tariff_type   VARCHAR(50) DEFAULT 'premium',
+      status        VARCHAR(50) DEFAULT 'not_available',
+      starts_at     TIMESTAMP,
+      expires_at    TIMESTAMP,
+      grace_ends_at TIMESTAMP,
+      note          TEXT,
+      updated_at    TIMESTAMP DEFAULT NOW()
+    )`);
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS tariff_config (
+      id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      secret_key    VARCHAR(255) NOT NULL,
+      updated_at    TIMESTAMP DEFAULT NOW(),
+      updated_by    UUID REFERENCES users(id) ON DELETE SET NULL
+    )`);
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS tariff_logs (
+      id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      target_type   VARCHAR(20) NOT NULL,
+      target_id     UUID NOT NULL,
+      action        VARCHAR(50) NOT NULL,
+      old_tariff    VARCHAR(50),
+      new_tariff    VARCHAR(50),
+      old_status    VARCHAR(50),
+      new_status    VARCHAR(50),
+      old_expires_at TIMESTAMP,
+      new_expires_at TIMESTAMP,
+      performed_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+      note          TEXT,
+      created_at    TIMESTAMP DEFAULT NOW()
+    )`);
+
+    // ─── users.role ENUM → VARCHAR migration ─────────────────
     try {
       const r = await pool.query(`SELECT udt_name FROM information_schema.columns WHERE table_name='users' AND column_name='role'`);
       if (r.rows[0]?.udt_name === 'user_role') {
