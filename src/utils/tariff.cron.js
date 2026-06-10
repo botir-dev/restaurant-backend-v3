@@ -5,7 +5,7 @@ const {
   notifyTariffExpired,
 } = require('./tariff.notify');
 
-const GRACE_HOURS = 24; // Grace period davomiyligi (soat)
+const GRACE_HOURS = 48; // Grace period davomiyligi (soat)
 
 /**
  * 1. Muddati yaqinlashgan tariflarni tekshiradi (7 kun va 1 kun)
