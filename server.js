@@ -25,7 +25,10 @@ const initDB = async () => {
     try {
       const r = await pool.query(`SELECT udt_name FROM information_schema.columns WHERE table_name='users' AND column_name='role'`);
       if (r.rows[0]?.udt_name === 'user_role') {
+        // tariff_config FK ni vaqtincha o'chirib, migration qilib, qayta qo'shamiz
+        await pool.query(`ALTER TABLE tariff_config DROP CONSTRAINT IF EXISTS tariff_config_updated_by_fkey`);
         await pool.query(`ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(100) USING role::TEXT`);
+        await pool.query(`ALTER TABLE tariff_config ADD CONSTRAINT tariff_config_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL`);
       }
     } catch (_) {}
 
