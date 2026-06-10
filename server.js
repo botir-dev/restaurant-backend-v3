@@ -37,7 +37,11 @@ const initDB = async () => {
     )`);
 
     // assigned_by migration — eski DB larda ustun bo'lmasligi mumkin
-    try { await pool.query(`ALTER TABLE branch_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID REFERENCES users(id) ON DELETE SET NULL`); } catch(_) {}
+    try {
+      await pool.query(`ALTER TABLE branch_tariffs DROP CONSTRAINT IF EXISTS branch_tariffs_assigned_by_fkey`);
+      await pool.query(`ALTER TABLE branch_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID`);
+      await pool.query(`ALTER TABLE branch_tariffs ADD CONSTRAINT branch_tariffs_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch(_) {}
 
     await pool.query(`CREATE TABLE IF NOT EXISTS restaurant_tariffs (
       id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -53,7 +57,11 @@ const initDB = async () => {
     )`);
 
     // assigned_by migration — eski DB larda ustun bo'lmasligi mumkin
-    try { await pool.query(`ALTER TABLE restaurant_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID REFERENCES users(id) ON DELETE SET NULL`); } catch(_) {}
+    try {
+      await pool.query(`ALTER TABLE restaurant_tariffs DROP CONSTRAINT IF EXISTS restaurant_tariffs_assigned_by_fkey`);
+      await pool.query(`ALTER TABLE restaurant_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID`);
+      await pool.query(`ALTER TABLE restaurant_tariffs ADD CONSTRAINT restaurant_tariffs_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch(_) {}
 
     await pool.query(`CREATE TABLE IF NOT EXISTS tariff_config (
       id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
