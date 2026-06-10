@@ -36,7 +36,6 @@ const initDB = async () => {
       updated_at    TIMESTAMP DEFAULT NOW()
     )`);
 
-    // assigned_by migration — eski DB larda ustun bo'lmasligi mumkin
     try {
       await pool.query(`ALTER TABLE branch_tariffs DROP CONSTRAINT IF EXISTS branch_tariffs_assigned_by_fkey`);
       await pool.query(`ALTER TABLE branch_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID`);
@@ -56,7 +55,6 @@ const initDB = async () => {
       updated_at    TIMESTAMP DEFAULT NOW()
     )`);
 
-    // assigned_by migration — eski DB larda ustun bo'lmasligi mumkin
     try {
       await pool.query(`ALTER TABLE restaurant_tariffs DROP CONSTRAINT IF EXISTS restaurant_tariffs_assigned_by_fkey`);
       await pool.query(`ALTER TABLE restaurant_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID`);
@@ -97,15 +95,19 @@ const initDB = async () => {
         await pool.query(`ALTER TABLE tariff_logs        DROP CONSTRAINT IF EXISTS tariff_logs_performed_by_fkey`);
         await pool.query(`ALTER TABLE waiter_earnings    DROP CONSTRAINT IF EXISTS waiter_earnings_waiter_id_fkey`);
         await pool.query(`ALTER TABLE role_earnings      DROP CONSTRAINT IF EXISTS role_earnings_user_id_fkey`);
+        await pool.query(`ALTER TABLE orders             DROP CONSTRAINT IF EXISTS orders_waiter_id_fkey`);
+        await pool.query(`ALTER TABLE reservations       DROP CONSTRAINT IF EXISTS reservations_created_by_fkey`);
 
         await pool.query(`ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(100) USING role::TEXT`);
 
-        await pool.query(`ALTER TABLE tariff_config      ADD CONSTRAINT tariff_config_updated_by_fkey      FOREIGN KEY (updated_by)  REFERENCES users(id) ON DELETE SET NULL`);
-        await pool.query(`ALTER TABLE branch_tariffs     ADD CONSTRAINT branch_tariffs_assigned_by_fkey    FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL`);
-        await pool.query(`ALTER TABLE restaurant_tariffs ADD CONSTRAINT restaurant_tariffs_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL`);
-        await pool.query(`ALTER TABLE tariff_logs        ADD CONSTRAINT tariff_logs_performed_by_fkey      FOREIGN KEY (performed_by) REFERENCES users(id) ON DELETE SET NULL`);
-        await pool.query(`ALTER TABLE waiter_earnings    ADD CONSTRAINT waiter_earnings_waiter_id_fkey     FOREIGN KEY (waiter_id)   REFERENCES users(id) ON DELETE CASCADE`);
-        await pool.query(`ALTER TABLE role_earnings      ADD CONSTRAINT role_earnings_user_id_fkey         FOREIGN KEY (user_id)     REFERENCES users(id) ON DELETE CASCADE`);
+        await pool.query(`ALTER TABLE tariff_config      ADD CONSTRAINT tariff_config_updated_by_fkey       FOREIGN KEY (updated_by)   REFERENCES users(id) ON DELETE SET NULL`);
+        await pool.query(`ALTER TABLE branch_tariffs     ADD CONSTRAINT branch_tariffs_assigned_by_fkey     FOREIGN KEY (assigned_by)  REFERENCES users(id) ON DELETE SET NULL`);
+        await pool.query(`ALTER TABLE restaurant_tariffs ADD CONSTRAINT restaurant_tariffs_assigned_by_fkey  FOREIGN KEY (assigned_by)  REFERENCES users(id) ON DELETE SET NULL`);
+        await pool.query(`ALTER TABLE tariff_logs        ADD CONSTRAINT tariff_logs_performed_by_fkey       FOREIGN KEY (performed_by) REFERENCES users(id) ON DELETE SET NULL`);
+        await pool.query(`ALTER TABLE waiter_earnings    ADD CONSTRAINT waiter_earnings_waiter_id_fkey      FOREIGN KEY (waiter_id)    REFERENCES users(id) ON DELETE CASCADE`);
+        await pool.query(`ALTER TABLE role_earnings      ADD CONSTRAINT role_earnings_user_id_fkey          FOREIGN KEY (user_id)      REFERENCES users(id) ON DELETE CASCADE`);
+        await pool.query(`ALTER TABLE orders             ADD CONSTRAINT orders_waiter_id_fkey               FOREIGN KEY (waiter_id)    REFERENCES users(id) ON DELETE SET NULL`);
+        await pool.query(`ALTER TABLE reservations       ADD CONSTRAINT reservations_created_by_fkey        FOREIGN KEY (created_by)   REFERENCES users(id) ON DELETE SET NULL`);
       }
     } catch (_) {}
 
