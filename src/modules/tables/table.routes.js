@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../../middleware/auth.middleware');
 const { branchFilter } = require('../../middleware/branch.middleware');
+const { checkTariffActive, requireFeature } = require('../../middleware/tariff.middleware');
 const c = require('./table.controller');
 
-router.use(authenticate, branchFilter);
+router.use(authenticate, branchFilter, checkTariffActive, requireFeature('tables_management'));
 
 router.get('/', c.getTables);
 router.post('/', authorize('manager'), c.createTable);
