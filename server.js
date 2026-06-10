@@ -31,9 +31,13 @@ const initDB = async () => {
       starts_at     TIMESTAMP,
       expires_at    TIMESTAMP,
       grace_ends_at TIMESTAMP,
+      assigned_by   UUID REFERENCES users(id) ON DELETE SET NULL,
       note          TEXT,
       updated_at    TIMESTAMP DEFAULT NOW()
     )`);
+
+    // assigned_by migration — eski DB larda ustun bo'lmasligi mumkin
+    try { await pool.query(`ALTER TABLE branch_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID REFERENCES users(id) ON DELETE SET NULL`); } catch(_) {}
 
     await pool.query(`CREATE TABLE IF NOT EXISTS restaurant_tariffs (
       id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -43,9 +47,13 @@ const initDB = async () => {
       starts_at     TIMESTAMP,
       expires_at    TIMESTAMP,
       grace_ends_at TIMESTAMP,
+      assigned_by   UUID REFERENCES users(id) ON DELETE SET NULL,
       note          TEXT,
       updated_at    TIMESTAMP DEFAULT NOW()
     )`);
+
+    // assigned_by migration — eski DB larda ustun bo'lmasligi mumkin
+    try { await pool.query(`ALTER TABLE restaurant_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID REFERENCES users(id) ON DELETE SET NULL`); } catch(_) {}
 
     await pool.query(`CREATE TABLE IF NOT EXISTS tariff_config (
       id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
