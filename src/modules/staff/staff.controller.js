@@ -55,6 +55,15 @@ const createStaff = async (req, res) => {
       }
     }
 
+    // Username global unique tekshiruv (barcha restoranlar bo'yicha)
+    const usernameCheck = await pool.query(
+      `SELECT id FROM users WHERE username = $1`,
+      [username]
+    );
+    if (usernameCheck.rows.length > 0) {
+      return error(res, 'Bu username allaqachon band. Boshqa username tanlang');
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
 
     const result = await pool.query(
@@ -66,7 +75,7 @@ const createStaff = async (req, res) => {
     );
     return created(res, result.rows[0], 'Hodim yaratildi');
   } catch (err) {
-    if (err.code === '23505') return error(res, 'Bu username allaqachon mavjud');
+    if (err.code === '23505') return error(res, 'Bu username allaqachon band. Boshqa username tanlang');
     if (err.code === '22P02') return error(res, "Bu rol ENUM da yo'q. Migration kerak");
     return error(res, 'Server xatosi', 500);
   }
@@ -155,15 +164,20 @@ const updateStaff = async (req, res) => {
   }
 };
 
-// DELETE /staff/:id (soft delete)
+// DELETE /staff/:id — to'liq o'chirish (hard delete)
+// O'chirilgan ishchining username i ozod bo'ladi va qayta ishlatilishi mumkin
 const deleteStaff = async (req, res) => {
   const { id } = req.params;
   try {
-    await pool.query(
-      `UPDATE users SET is_active = FALSE, updated_at = NOW()
-       WHERE id = $1 AND branch_id = $2 AND role != 'manager'`,
+    const result = await pool.query(
+      `DELETE FROM users
+       WHERE id = $1 AND branch_id = $2 AND role != 'manager'
+       RETURNING id`,
       [id, req.branchId]
     );
+    if (result.rows.length === 0) {
+      return error(res, "Hodim topilmadi yoki manager o'chirilmaydi", 404);
+    }
     return success(res, {}, "Hodim o'chirildi");
   } catch (err) {
     return error(res, 'Server xatosi', 500);
