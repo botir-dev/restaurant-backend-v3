@@ -5,6 +5,7 @@ const { getFeaturesWithLabels, TARIFF_FEATURES } = require('../../utils/tariff.f
 const {
   notifyTariffAssigned,
   notifyTariffExtended,
+  notifyTariffExpired,
 } = require('../../utils/tariff.notify');
 
 // ─── YORDAMCHI: tarif logi yozish ────────────────────────────
@@ -327,6 +328,10 @@ const revokeBranchTariff = async (req, res) => {
     });
 
     await client.query('COMMIT');
+
+    // Manager va owner ga xabar yuborish
+    notifyTariffExpired(branchId, old.tariff_type).catch(console.error);
+
     return success(res, {}, 'Tarif bekor qilindi');
   } catch (err) {
     await client.query('ROLLBACK');
