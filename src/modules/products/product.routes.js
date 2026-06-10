@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../../middleware/auth.middleware');
 const { branchFilter } = require('../../middleware/branch.middleware');
+const { checkTariffActive } = require('../../middleware/tariff.middleware');
 const c = require('./product.controller');
 
-router.use(authenticate, branchFilter);
+router.use(authenticate, branchFilter, checkTariffActive);
 
 router.get('/', c.getProducts);
 router.post('/', authorize('manager', 'storekeeper'), c.createProduct);
