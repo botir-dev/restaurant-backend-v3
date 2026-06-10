@@ -36,12 +36,6 @@ const initDB = async () => {
       updated_at    TIMESTAMP DEFAULT NOW()
     )`);
 
-    try {
-      await pool.query(`ALTER TABLE branch_tariffs DROP CONSTRAINT IF EXISTS branch_tariffs_assigned_by_fkey`);
-      await pool.query(`ALTER TABLE branch_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID`);
-      await pool.query(`ALTER TABLE branch_tariffs ADD CONSTRAINT branch_tariffs_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL`);
-    } catch(_) {}
-
     await pool.query(`CREATE TABLE IF NOT EXISTS restaurant_tariffs (
       id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       restaurant_id UUID NOT NULL UNIQUE REFERENCES restaurants(id) ON DELETE CASCADE,
@@ -54,12 +48,6 @@ const initDB = async () => {
       note          TEXT,
       updated_at    TIMESTAMP DEFAULT NOW()
     )`);
-
-    try {
-      await pool.query(`ALTER TABLE restaurant_tariffs DROP CONSTRAINT IF EXISTS restaurant_tariffs_assigned_by_fkey`);
-      await pool.query(`ALTER TABLE restaurant_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID`);
-      await pool.query(`ALTER TABLE restaurant_tariffs ADD CONSTRAINT restaurant_tariffs_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL`);
-    } catch(_) {}
 
     await pool.query(`CREATE TABLE IF NOT EXISTS tariff_config (
       id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -84,11 +72,46 @@ const initDB = async () => {
       created_at    TIMESTAMP DEFAULT NOW()
     )`);
 
+    // ─── FK CONSTRAINT LARNI TO'G'IRLASH (har doim ishlaydigan) ──
+    // users(id) ga NO ACTION bilan bog'liq FK larni SET NULL/CASCADE ga o'tkazamiz
+    // Bu blok ENUM holatidan qat'iy nazar har deploy da ishlaydi
+    try {
+      // tariff_logs.performed_by — NO ACTION edi, SET NULL bo'lishi kerak
+      await pool.query(`ALTER TABLE tariff_logs DROP CONSTRAINT IF EXISTS tariff_logs_performed_by_fkey`);
+      await pool.query(`ALTER TABLE tariff_logs ADD CONSTRAINT tariff_logs_performed_by_fkey FOREIGN KEY (performed_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch(_) {}
+
+    try {
+      // orders.waiter_id — NO ACTION edi, SET NULL bo'lishi kerak
+      await pool.query(`ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_waiter_id_fkey`);
+      await pool.query(`ALTER TABLE orders ADD CONSTRAINT orders_waiter_id_fkey FOREIGN KEY (waiter_id) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch(_) {}
+
+    try {
+      // reservations.created_by — NO ACTION edi, SET NULL bo'lishi kerak
+      await pool.query(`ALTER TABLE reservations DROP CONSTRAINT IF EXISTS reservations_created_by_fkey`);
+      await pool.query(`ALTER TABLE reservations ADD CONSTRAINT reservations_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch(_) {}
+
+    try {
+      // branch_tariffs.assigned_by — ustun qo'shish + SET NULL
+      await pool.query(`ALTER TABLE branch_tariffs DROP CONSTRAINT IF EXISTS branch_tariffs_assigned_by_fkey`);
+      await pool.query(`ALTER TABLE branch_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID`);
+      await pool.query(`ALTER TABLE branch_tariffs ADD CONSTRAINT branch_tariffs_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch(_) {}
+
+    try {
+      // restaurant_tariffs.assigned_by — ustun qo'shish + SET NULL
+      await pool.query(`ALTER TABLE restaurant_tariffs DROP CONSTRAINT IF EXISTS restaurant_tariffs_assigned_by_fkey`);
+      await pool.query(`ALTER TABLE restaurant_tariffs ADD COLUMN IF NOT EXISTS assigned_by UUID`);
+      await pool.query(`ALTER TABLE restaurant_tariffs ADD CONSTRAINT restaurant_tariffs_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch(_) {}
+
     // ─── users.role ENUM → VARCHAR migration ─────────────────
     try {
       const r = await pool.query(`SELECT udt_name FROM information_schema.columns WHERE table_name='users' AND column_name='role'`);
       if (r.rows[0]?.udt_name === 'user_role') {
-        // users(id) ga bog'liq BARCHA FK larni vaqtincha o'chirib, migration qilib, qayta qo'shamiz
+        // users(id) ga bog'liq barcha FK larni vaqtincha o'chirib, migration qilib, qayta qo'shamiz
         await pool.query(`ALTER TABLE tariff_config      DROP CONSTRAINT IF EXISTS tariff_config_updated_by_fkey`);
         await pool.query(`ALTER TABLE branch_tariffs     DROP CONSTRAINT IF EXISTS branch_tariffs_assigned_by_fkey`);
         await pool.query(`ALTER TABLE restaurant_tariffs DROP CONSTRAINT IF EXISTS restaurant_tariffs_assigned_by_fkey`);
@@ -214,7 +237,6 @@ const initDB = async () => {
     const password = process.env.SUPER_ADMIN_PASSWORD;
 
     if (!password) {
-      // Production da majburiy
       if (process.env.NODE_ENV === 'production') {
         console.error('[KRITIK] SUPER_ADMIN_PASSWORD env o\'zgaruvchisi o\'rnatilmagan! Server to\'xtatilmoqda.');
         process.exit(1);
