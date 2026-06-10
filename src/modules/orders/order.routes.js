@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../../middleware/auth.middleware');
 const { branchFilter } = require('../../middleware/branch.middleware');
+const { checkTariffActive, requireFeature } = require('../../middleware/tariff.middleware');
 const c = require('./order.controller');
 
-router.use(authenticate, branchFilter);
+router.use(authenticate, branchFilter, checkTariffActive, requireFeature('orders'));
 
 router.get('/', authorize(
   'manager', 'waiter', 'cashier', 'cook', 'baker',
