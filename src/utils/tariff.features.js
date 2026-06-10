@@ -17,6 +17,8 @@ const TARIFF_FEATURES = {
     basic_daily_revenue: true,     // Faqat kunlik umumiy tushum
     orders: true,                  // Buyurtmalar moduli
 
+    menu_management: true,         // Menyu boshqaruvi (tizim ishlashi uchun zarur)
+
     // YOPIQ
     inventory: false,              // Ombor boshqaruvi
     recipes: false,                // Retseptlar va avtomatik ayrilish
@@ -25,7 +27,6 @@ const TARIFF_FEATURES = {
     pdf_reports: false,            // Hisobotlarni PDF yuklab olish
     staff_salary: false,           // Maosh va komissiya hisoblash
     multi_branch: false,           // Ko'p filial ko'rinishi
-    menu_management: false,        // Menyu boshqaruvi (to'liq)
   },
 
   standard: {
