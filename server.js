@@ -72,6 +72,17 @@ const initDB = async () => {
       created_at    TIMESTAMP DEFAULT NOW()
     )`);
 
+    // ─── USERNAME GLOBAL UNIQUE MIGRATION ──────────────────
+    // Eski (restaurant_id, branch_id, username) constraint ni olib,
+    // butun tizim bo'yicha global unique qo'yamiz
+    try {
+      await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_restaurant_id_branch_id_username_key`);
+      const uidx = await pool.query(`SELECT 1 FROM pg_indexes WHERE tablename='users' AND indexname='users_username_key'`);
+      if (uidx.rows.length === 0) {
+        await pool.query(`ALTER TABLE users ADD CONSTRAINT users_username_key UNIQUE (username)`);
+      }
+    } catch(_) {}
+
     // ─── FK CONSTRAINT LARNI TO'G'IRLASH (har doim ishlaydigan) ──
     // users(id) ga NO ACTION bilan bog'liq FK larni SET NULL/CASCADE ga o'tkazamiz
     // Bu blok ENUM holatidan qat'iy nazar har deploy da ishlaydi
