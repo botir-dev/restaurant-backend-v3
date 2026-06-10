@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../../middleware/auth.middleware');
 const { branchFilter } = require('../../middleware/branch.middleware');
+const { checkTariffActive, requireFeature } = require('../../middleware/tariff.middleware');
 const c = require('./staff.controller');
 
-router.use(authenticate, branchFilter, authorize('manager'));
+router.use(authenticate, branchFilter, authorize('manager'), checkTariffActive, requireFeature('staff_management'));
 
 router.get('/', c.getStaff);
 router.post('/', c.createStaff);
